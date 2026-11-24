@@ -1,0 +1,8 @@
+# 桌面窗口外壳
+pywebview>=5.0
+
+# 任务栏图标与开始菜单快捷方式（AUMID）
+pywin32>=306
+
+# 图标生成（assets/make_icon.py）
+Pillow>=10.0
