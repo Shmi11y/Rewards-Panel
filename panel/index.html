@@ -32,6 +32,7 @@
   .dot.on{background:var(--green);box-shadow:0 0 0 3px rgba(18,168,106,.15)}
   main{display:flex;flex-direction:column;min-width:0;min-height:0;overflow:hidden}
   header{display:flex;align-items:center;gap:11px;padding:13px 28px;border-bottom:1px solid var(--line);background:var(--panel)}
+  header{user-select:none;-webkit-user-select:none}
   header h1{font-size:23px;font-weight:600;letter-spacing:.01em}
   .spacer{flex:1}
   header>button{padding:6px 13px;font-size:12.5px;border-radius:9px}
@@ -1287,14 +1288,21 @@ async function toggleWinMax(){
   if(typeof v === 'boolean') setWinMax(v);
   else setWinMax(!document.documentElement.classList.contains('win-max'));
 }
-document.querySelector('header').addEventListener('dblclick',e=>{
-  if(e.target.closest('button,select,input')) return;
+const headerEl = document.querySelector('header');
+headerEl.addEventListener('mousedown', e => {
+  if (e.button !== 0) return;
+  if (e.target.closest('button,select,input,a,label')) return;
+  const a = winApi();
+  if (a && a.drag) { e.preventDefault(); a.drag().catch(()=>{}); }
+});
+headerEl.addEventListener('dblclick', e => {
+  if (e.target.closest('button,select,input,a,label')) return;
   toggleWinMax();
 });
 document.getElementById('wbClose').onclick=()=>{const a=winApi(); if(a) a.close().catch(()=>{});};
 setTimeout(()=>{
   fetch('/api/ui',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({bridge:!!(window.pywebview&&window.pywebview.api),w:innerWidth,h:innerHeight,dpr:devicePixelRatio})}).catch(()=>{});
+    body:JSON.stringify({bridge:!!(window.pywebview&&window.pywebview.api),api:Object.keys((window.pywebview&&window.pywebview.api)||{}).join(','),w:innerWidth,h:innerHeight,dpr:devicePixelRatio})}).catch(()=>{});
   if(!(window.pywebview&&window.pywebview.api)) document.querySelector('.winbar').style.opacity='.35';
 },1600);
 

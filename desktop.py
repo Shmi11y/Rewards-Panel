@@ -10,7 +10,7 @@ Rewards 桌面外壳（无边框窗口）
     4. 关窗即退出，退出前把在跑的任务停掉
     5. 设置窗口 / 任务栏图标
 
-无边框拖动靠 pywebview 的 easy_drag（按住页面空白处拖）。
+拖动只发生在顶栏（页面自己派的 begin_drag 请求），页面其它地方不响应。
 """
 from __future__ import annotations
 
@@ -228,6 +228,51 @@ def save_geometry(window, force: bool = False) -> None:
         _log(f"保存窗口尺寸失败: {exc}")
 
 
+
+
+class _RECT(ctypes.Structure):
+    _fields_ = [("left", ctypes.c_long), ("top", ctypes.c_long),
+                ("right", ctypes.c_long), ("bottom", ctypes.c_long)]
+
+
+class _POINT(ctypes.Structure):
+    _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
+
+
+_dragging = threading.Lock()
+
+
+def _drag_loop() -> None:
+    """按住期间每 8ms 把窗口挪到“光标位移”对应的位置
+
+    不走 JS 桥逐帧通信，所以拖动是跟手的。
+    """
+    if not _dragging.acquire(blocking=False):
+        return
+    try:
+        user32 = ctypes.windll.user32
+        hwnd = user32.FindWindowW(None, TITLE)
+        if not hwnd:
+            return
+        start = _POINT()
+        user32.GetCursorPos(ctypes.byref(start))
+        rect = _RECT()
+        user32.GetWindowRect(hwnd, ctypes.byref(rect))
+        base_x, base_y = rect.left, rect.top
+
+        SWP_NOSIZE, SWP_NOZORDER, SWP_NOACTIVATE = 0x0001, 0x0004, 0x0010
+        VK_LBUTTON = 0x01
+        while user32.GetAsyncKeyState(VK_LBUTTON) & 0x8000:
+            cur = _POINT()
+            user32.GetCursorPos(ctypes.byref(cur))
+            user32.SetWindowPos(hwnd, None,
+                                base_x + (cur.x - start.x),
+                                base_y + (cur.y - start.y),
+                                0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE)
+            time.sleep(0.008)
+    finally:
+        _dragging.release()
+
 # ---------------------------------------------------------------- 图标
 
 def apply_icon() -> bool:
@@ -288,6 +333,13 @@ class Api:
             return self._maxed
         return self._maxed
 
+    def drag(self) -> bool:
+        """页面顶栏按下时调用，开始拖动窗口"""
+        if not self._win or self._maxed:
+            return False
+        threading.Thread(target=_drag_loop, daemon=True).start()
+        return True
+
     def close(self) -> bool:
         """页面上的 ✕：先清理（停任务、存几何），再真正销毁窗口"""
         try:
@@ -343,7 +395,7 @@ def main() -> int:
     x, y, w, h = load_geometry()
     api_obj = Api()
     win_kwargs = dict(width=w, height=h, min_size=MIN_SIZE, background_color="#f4f6fa",
-                      frameless=True, easy_drag=True, js_api=api_obj)
+                      frameless=True, easy_drag=False, js_api=api_obj)
     if x >= 0 and y >= 0:
         win_kwargs.update(x=x, y=y)
 
