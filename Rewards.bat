@@ -27,16 +27,14 @@ if not exist "%ROOT%\desktop.py" (
 
 rem ---- prefer the Python runtime shipped with the portable edition ----
 set "PYW="
-if exist "%ROOT%\runtime\python\pythonw.exe" (
-    set "PYW=%ROOT%\runtime\python\pythonw.exe"
-    set "PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD="
-    echo Checking Chromium. The first launch downloads it automatically.
-    "%ROOT%\app\node.exe" "%ROOT%\app\node_modules\patchright\cli.js" install chromium
+if exist "%ROOT%\runtime\python\python.exe" (
+    "%ROOT%\runtime\python\python.exe" -X utf8 "%ROOT%\portable_launcher.py"
     if errorlevel 1 (
-        echo [ERROR] Chromium setup failed. Check your network and run Rewards.bat again.
+        echo [ERROR] Rewards startup failed.
         pause
         exit /b 1
     )
+    exit /b 0
 )
 if not defined PYW if exist "%LOCALAPPDATA%\Programs\Python\Python313\pythonw.exe" set "PYW=%LOCALAPPDATA%\Programs\Python\Python313\pythonw.exe"
 if not defined PYW (

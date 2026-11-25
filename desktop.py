@@ -124,7 +124,12 @@ def ensure_shortcut() -> None:
 
     try:
         exe = Path(sys.executable)
-        if exe.name.lower() == "python.exe":
+        arguments = f'"{ROOT / "desktop.py"}"'
+        launcher = ROOT / "Rewards.exe"
+        if launcher.is_file():
+            exe = launcher
+            arguments = ""
+        elif exe.name.lower() == "python.exe":
             cand = exe.with_name("pythonw.exe")
             if cand.exists():
                 exe = cand
@@ -133,7 +138,7 @@ def ensure_shortcut() -> None:
                                           pythoncom.CLSCTX_INPROC_SERVER,
                                           shell.IID_IShellLink)
         link.SetPath(str(exe))
-        link.SetArguments(f'"{ROOT / "desktop.py"}"')
+        link.SetArguments(arguments)
         link.SetWorkingDirectory(str(ROOT))
         link.SetIconLocation(str(ICO), 0)
         link.SetDescription("Rewards")
@@ -400,6 +405,8 @@ def main() -> int:
         return 0
 
     start_backend()
+    if os.environ.get("REWARDS_USE_CHROMIUM_UI") == "1":
+        return fallback_chromium()
 
     try:
         import webview  # noqa: PLC0415
