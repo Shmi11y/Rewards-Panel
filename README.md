@@ -2,15 +2,15 @@
 
 Rewards 面板是基于开源项目 Microsoft-Rewards-Script 的 Windows 桌面 GUI，用于管理 Microsoft Rewards 账号、查看积分和日志、配置任务及安排定时运行。界面通过 pywebview 显示为本地桌面窗口。[Microsoft-Rewards-Script](https://github.com/TheNetsky/Microsoft-Rewards-Script)
 
-## Windows x64 轻量便携版
+## 下载 Windows x64 轻量便携版
 
-1. 将 ZIP 完整解压到本机可写入的目录。
-2. 双击解压目录里的 **`Rewards.exe`**。
+**[下载 Rewards Panel 轻量便携包（74.7 MiB）](https://github.com/Shmi11y/rewards-panel/releases/latest/download/RewardsPanel-windows-x64-lite.zip)**
+
+1. 将 ZIP 完整解压到本机可写入的目录，打开 `RewardsPanel` 文件夹。
+2. 双击带项目图标的 **`Rewards.exe`**。
 3. **首次启动请保持联网。** 程序会自动配置运行环境并下载 Chromium。已有 WebView2 会直接复用，缺少时会自动下载到软件目录。
 
 Python 和 Node.js 已随包提供。面板打开后，在「账号 → 添加账号」完成首次登录。
-
-已发布的 v0.1.0 便携包使用 `Rewards.bat` 启动。[下载 v0.1.0](https://github.com/Shmi11y/rewards-panel/releases/download/v0.1.0/RewardsPanel-windows-x64-portable.zip)
 
 | 浅色 | 深色 |
 |---|---|
