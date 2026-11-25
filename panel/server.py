@@ -912,7 +912,9 @@ class Handler(BaseHTTPRequestHandler):
             result = sched_mod.update(str(body.get("mode", "manual")),
                                       body.get("times") or body.get("time"),
                                       body.get("retry"),
-                                      body.get("weekdaysOnly"))
+                                      body.get("weekdaysOnly"),
+                                      body.get("catchUpMode"),
+                                      body.get("catchUpMinutes"))
         else:
             self._send(404, b"not found", "text/plain")
             return

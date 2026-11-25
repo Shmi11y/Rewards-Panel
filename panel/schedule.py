@@ -16,16 +16,19 @@ schedule.json:
 """
 from __future__ import annotations
 
-import ctypes
 import json
 import os
+import sqlite3
 import subprocess
 import sys
 import time
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 
 ROOT = Path(__file__).resolve().parent.parent
+import run_history
+
 DATA = Path(os.environ.get("REWARDS_DATA_DIR") or ROOT / "data").resolve()
 SCHED = DATA / "schedule.json"
 PIDFILE = DATA / "scheduler.pid"
@@ -37,8 +40,9 @@ BOOT_BAT = STARTUP_DIR / "RewardsBoot.bat"
 DAEMON_BAT = STARTUP_DIR / "RewardsScheduler.bat"
 
 DEFAULTS = {"mode": "manual", "times": ["09:10"], "done": {}, "bootDelay": 60,
-            "retry": 0, "weekdaysOnly": False}
+            "retry": 0, "weekdaysOnly": False, "catchUpMode": "latest", "catchUpMinutes": 720}
 MAX_TIMES = 4
+MAX_CATCH_UP_MINUTES = 1440
 
 
 # ---------------------------------------------------------------- 基础
@@ -55,16 +59,7 @@ def find_pythonw() -> str | None:
     return None
 
 
-def _pid_alive(pid: int) -> bool:
-    if not pid:
-        return False
-    handle = ctypes.windll.kernel32.OpenProcess(0x1000, False, pid)
-    if not handle:
-        return False
-    code = ctypes.c_ulong()
-    ok = ctypes.windll.kernel32.GetExitCodeProcess(handle, ctypes.byref(code))
-    ctypes.windll.kernel32.CloseHandle(handle)
-    return bool(ok) and code.value == 259
+_pid_alive = run_history.process_alive
 
 
 def daemon_pid() -> int:
@@ -90,8 +85,10 @@ def load() -> dict:
     data = dict(DEFAULTS)
     data["done"] = {}
     data["times"] = list(DEFAULTS["times"])
+    last_modified = 0
     if SCHED.exists():
         try:
+            last_modified = SCHED.stat().st_mtime
             got = json.loads(SCHED.read_text(encoding="utf-8"))
             if isinstance(got, dict):
                 if "time" in got and "times" not in got:      # 兼容旧格式
@@ -105,20 +102,42 @@ def load() -> dict:
     data["times"] = sorted(set(times))[:MAX_TIMES] or list(DEFAULTS["times"])
     if not isinstance(data.get("done"), dict):
         data["done"] = {}
+    if type(data.get("activeAfter")) not in (int, float) or not 0 <= data["activeAfter"] < float("inf"):
+        data["activeAfter"] = last_modified
+    if data["catchUpMode"] not in ("latest", "skip"):
+        data["catchUpMode"] = DEFAULTS["catchUpMode"]
+    if type(data["catchUpMinutes"]) is not int or not 1 <= data["catchUpMinutes"] <= MAX_CATCH_UP_MINUTES:
+        data["catchUpMinutes"] = DEFAULTS["catchUpMinutes"]
     return data
 
 
 def save(data: dict) -> None:
     DATA.mkdir(parents=True, exist_ok=True)
-    SCHED.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    stream = NamedTemporaryFile(mode="w", encoding="utf-8", dir=DATA, delete=False)
+    staging = Path(stream.name)
+    try:
+        with stream:
+            json.dump(data, stream, ensure_ascii=False, indent=2)
+        staging.replace(SCHED)
+    finally:
+        staging.unlink(missing_ok=True)
 
 
-def _today() -> str:
-    return datetime.now().strftime("%Y-%m-%d")
+def slot_timestamp(day: date, slot: str) -> int:
+    hour, minute = map(int, slot.split(":"))
+    return int(datetime(day.year, day.month, day.day, hour, minute).timestamp())
 
 
-def done_today(data: dict) -> list[str]:
-    return list((data.get("done") or {}).get(_today()) or [])
+def done_today(data: dict, now: datetime) -> list[str]:
+    day = now.date()
+    legacy = data["done"].get(day.isoformat()) or []
+    if data.get("skipDate") == day.isoformat():
+        return list(data["times"])
+    try:
+        handled = run_history.processed_slots(DATA, slot_timestamp(day, "00:00"))
+    except sqlite3.Error:
+        handled = set()
+    return [slot for slot in data["times"] if slot in legacy or slot_timestamp(day, slot) in handled]
 
 
 # ---------------------------------------------------------------- 启动项
@@ -196,38 +215,40 @@ def stop_daemon() -> bool:
 
 # ---------------------------------------------------------------- 计算
 
-def next_run_text(data: dict) -> str | None:
+def next_run_text(data: dict, now: datetime, done: list[str]) -> str | None:
     mode = data.get("mode", "manual")
     if mode == "manual":
         return None
     if mode == "boot":
         return "下次开机登录后约 1 分钟"
-    now = datetime.now()
-    done = set(done_today(data))
-    cands = []
-    for t in data.get("times", []):
-        hh, mm = [int(x) for x in t.split(":")]
-        slot = now.replace(hour=hh, minute=mm, second=0, microsecond=0)
-        if t in done or slot <= now:
-            slot += timedelta(days=1)
-        cands.append(slot)
-    if not cands:
-        return None
-    return min(cands).strftime("%Y-%m-%d %H:%M")
+    for offset in range(8):
+        day = now.date() + timedelta(days=offset)
+        if data["weekdaysOnly"] and day.weekday() >= 5:
+            continue
+        for slot in data["times"]:
+            due = slot_timestamp(day, slot)
+            if due <= now.timestamp() or (offset == 0 and slot in done):
+                continue
+            return datetime.fromtimestamp(due).strftime("%Y-%m-%d %H:%M")
+    return None
 
 
 def status() -> dict:
     data = load()
+    now = datetime.now()
+    done = done_today(data, now)
     st = startup_status()
     st.update({
         "mode": data.get("mode", "manual"),
         "times": data.get("times", []),
         "time": (data.get("times") or ["09:10"])[0],
-        "doneToday": done_today(data),
+        "doneToday": done,
         "retry": data.get("retry", 0),
         "weekdaysOnly": bool(data.get("weekdaysOnly", False)),
         "bootDelay": data.get("bootDelay", 60),
-        "nextRun": next_run_text(data),
+        "catchUpMode": data["catchUpMode"],
+        "catchUpMinutes": data["catchUpMinutes"],
+        "nextRun": next_run_text(data, now, done),
         "daemonAlive": _pid_alive(daemon_pid()),
         "pythonw": find_pythonw(),
         "taskPath": str(TASK),
@@ -235,10 +256,11 @@ def status() -> dict:
     return st
 
 
-def update(mode: str, times=None, retry=None, weekdays_only=None) -> dict:
+def update(mode: str, times=None, retry=None, weekdays_only=None, catch_up_mode=None, catch_up_minutes=None) -> dict:
     if mode not in ("manual", "daily", "boot"):
         return {"ok": False, "msg": "模式不合法"}
     data = load()
+    previous_plan = (data["mode"], data["times"], data["weekdaysOnly"])
     if times is not None:
         if isinstance(times, str):
             times = [times]
@@ -252,7 +274,17 @@ def update(mode: str, times=None, retry=None, weekdays_only=None) -> dict:
         data["retry"] = max(0, min(2, int(retry)))
     if weekdays_only is not None:
         data["weekdaysOnly"] = bool(weekdays_only)
+    if catch_up_mode is not None:
+        if catch_up_mode not in ("latest", "skip"):
+            return {"ok": False, "msg": "补跑规则不合法"}
+        data["catchUpMode"] = catch_up_mode
+    if catch_up_minutes is not None:
+        if type(catch_up_minutes) is not int or not 1 <= catch_up_minutes <= MAX_CATCH_UP_MINUTES:
+            return {"ok": False, "msg": f"补跑时限须为 1 到 {MAX_CATCH_UP_MINUTES} 分钟"}
+        data["catchUpMinutes"] = catch_up_minutes
     data["mode"] = mode
+    if (mode, data["times"], data["weekdaysOnly"]) != previous_plan:
+        data["activeAfter"] = time.time()
     save(data)
 
     st = apply_startup(mode)
@@ -269,9 +301,16 @@ def update(mode: str, times=None, retry=None, weekdays_only=None) -> dict:
 def skip_today() -> dict:
     """把今天所有时间点标记为已完成，今天不再自动触发"""
     data = load()
-    day = _today()
+    now = datetime.now()
+    date = now.date()
+    day = date.isoformat()
+    handled = done_today(data, now)
     data.setdefault("done", {})[day] = list(data.get("times") or [])
+    data["skipDate"] = day
     save(data)
+    if data["mode"] == "daily" and (not data["weekdaysOnly"] or date.weekday() < 5):
+        upcoming = [slot_timestamp(date, slot) for slot in data["times"] if slot not in handled]
+        run_history.record_skips(DATA, [(slot, "手动选择今天跳过") for slot in upcoming if slot >= data["activeAfter"]])
     out = status()
     out["ok"] = True
     return out

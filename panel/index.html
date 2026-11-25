@@ -547,6 +547,17 @@
                   <option value="2">重试 2 次</option>
                 </select>
               </div>
+              <div class="inline" style="margin-top:12px">
+                <label class="k" for="schCatchUp">错过定时时</label>
+                <select id="schCatchUp" class="tin" style="width:132px">
+                  <option value="latest">补最近一次</option>
+                  <option value="skip">直接跳过</option>
+                </select>
+                <label class="k" for="schCatchLimit">补跑时限</label>
+                <input type="number" id="schCatchLimit" class="tin" style="width:78px" min="1" max="1440" step="1" value="720">
+                <span class="k">分钟</span>
+              </div>
+              <div class="sub">关机或休眠后的补跑和跳过结果会显示在首页「最近运行」。</div>
             </div>
             <div class="sub" id="schHint" style="margin-top:12px"></div>
             <div style="display:flex;gap:9px;margin-top:14px">
@@ -684,6 +695,9 @@ function renderSchedule(sc){
   renderTimeRows();
   if(document.activeElement !== $('schRetry')) $('schRetry').value = String(sc.retry || 0);
   if(document.activeElement !== $('schWeekday')) $('schWeekday').checked = !!sc.weekdaysOnly;
+  $('schCatchUp').value = sc.catchUpMode || 'latest';
+  $('schCatchLimit').value = String(sc.catchUpMinutes ?? 720);
+  $('schCatchLimit').disabled = $('schCatchUp').value === 'skip';
   $('schHint').textContent = SCH_MODE==='manual'
     ? '只在你点「开始任务」时执行'
     : SCH_MODE==='daily'
@@ -693,7 +707,7 @@ function renderSchedule(sc){
   const doneList = (sc.doneToday || []);
   const rows = [
     ['下次运行', sc.nextRun || '—'],
-    ['今日已完成', doneList.length ? doneList.join('、') : '—'],
+    ['今日已处理', doneList.length ? doneList.join('、') : '—'],
     ['守护进程', sc.daemonAlive ? '运行中' : '未运行'],
     ['开机启动项', flags],
     ['执行脚本', sc.taskPath || ''],
@@ -807,8 +821,12 @@ let historyVersion=null;
 let historyRequest=0;
 
 function runSummary(run){
-  const parts=[RUN_TIME.format(new Date(run.startedAt*1000)), RUN_SOURCES[run.source]||'任务'];
-  if(run.finishedAt!=null){
+  const source=run.scheduleKind==='catch_up' ? '定时补跑' : run.scheduleKind==='retry' ? '定时重试' : RUN_SOURCES[run.source]||'任务';
+  const parts=[RUN_TIME.format(new Date(run.startedAt*1000)),source];
+  if(run.scheduledAt!=null && run.scheduleKind!=='on_time'){
+    parts.push('原定 '+RUN_TIME.format(new Date(run.scheduledAt*1000)));
+  }
+  if(run.finishedAt!=null && run.scheduleKind!=='skipped'){
     const seconds=Math.max(0,Math.round(run.finishedAt-run.startedAt));
     parts.push(seconds<60 ? seconds+' 秒' : Math.floor(seconds/60)+' 分 '+(seconds%60)+' 秒');
   }
@@ -1325,6 +1343,8 @@ $('schSave').onclick=async()=>{
   const mode=SCH_MODE;
   const times=(SCH_TIMES||[]).filter(Boolean);
   const retry=Number($('schRetry').value||0);
+  const catchUpMode=$('schCatchUp').value;
+  const catchUpMinutes=Number($('schCatchLimit').value);
   if(mode==='daily' && !times.length) return toast('至少保留一个时间点');
   const cleaned=[];
   for(const t of times){
@@ -1332,13 +1352,27 @@ $('schSave').onclick=async()=>{
     if(!n) return toast('时间格式不对：'+t+'（用 24 小时制，如 09:10）');
     cleaned.push(n);
   }
+  if(mode==='daily' && catchUpMode==='latest' && (!Number.isInteger(catchUpMinutes) || catchUpMinutes<1 || catchUpMinutes>1440)){
+    return toast('补跑时限须为 1 到 1440 分钟');
+  }
   SCH_TIMES = cleaned;
-  const d=await post('/api/schedule',{mode,times:cleaned,retry,weekdaysOnly:$('schWeekday').checked});
+  const payload={mode,times:cleaned,retry,weekdaysOnly:$('schWeekday').checked};
+  if(mode==='daily'){
+    payload.catchUpMode=catchUpMode;
+    if(catchUpMode==='latest') payload.catchUpMinutes=catchUpMinutes;
+  }
+  const d=await post('/api/schedule',payload);
   if(!d.ok) return toast(d.msg||'保存失败');
   SCH_DIRTY=false;
   toast(mode==='manual'?'已关闭自动运行':(mode==='daily'?'已设为每天 '+times.join('、'):'已设为开机自动'));
   renderSchedule(d); tick();
 };
+
+$('schCatchUp').onchange=()=>{
+  SCH_DIRTY=true;
+  $('schCatchLimit').disabled=$('schCatchUp').value==='skip';
+};
+$('schCatchLimit').oninput=()=>{SCH_DIRTY=true;};
 
 $('schRunNow').onclick=async()=>{
   BUSY=true;

@@ -32,7 +32,9 @@ CREATE TABLE IF NOT EXISTS runs (
     exit_code INTEGER,
     accounts TEXT NOT NULL DEFAULT '[]',
     points INTEGER,
-    reason TEXT
+    reason TEXT,
+    scheduled_at INTEGER,
+    schedule_kind TEXT
 )
 """
 SOURCES = ("manual", "daily", "boot")
@@ -63,13 +65,55 @@ def _connect(data: Path) -> sqlite3.Connection:
     return conn
 
 
-def _claim(data: Path, source: str) -> int | None:
+def _begin_write(conn: sqlite3.Connection) -> None:
+    conn.execute("BEGIN IMMEDIATE")
+    conn.execute(SCHEMA)
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(runs)")}
+    if "scheduled_at" not in columns:
+        conn.execute("ALTER TABLE runs ADD COLUMN scheduled_at INTEGER")
+    if "schedule_kind" not in columns:
+        conn.execute("ALTER TABLE runs ADD COLUMN schedule_kind TEXT")
+    conn.execute("""CREATE UNIQUE INDEX IF NOT EXISTS runs_scheduled_slot
+                    ON runs(scheduled_at) WHERE schedule_kind != 'retry'""")
+
+
+def processed_slots(data: Path, since: int) -> set[int]:
+    if not (data / "runs.sqlite3").is_file():
+        return set()
+    with closing(_connect(data)) as conn:
+        if not any(row["name"] == "scheduled_at" for row in conn.execute("PRAGMA table_info(runs)")):
+            return set()
+        rows = conn.execute(
+            "SELECT scheduled_at FROM runs WHERE scheduled_at >= ? AND schedule_kind != 'retry'", (since,)
+        )
+        return {row[0] for row in rows}
+
+
+def record_skips(data: Path, skips: list[tuple[int, str]]) -> None:
+    if not skips:
+        return
+    data.mkdir(parents=True, exist_ok=True)
+    now = time.time()
+    with closing(_connect(data)) as conn, conn:
+        _begin_write(conn)
+        conn.executemany(
+            """INSERT OR IGNORE INTO runs(source, started_at, finished_at, status, runner_pid,
+                   reason, scheduled_at, schedule_kind)
+               VALUES ('daily', ?, ?, 'skipped', 0, ?, ?, 'skipped')""",
+            [(now, now, reason, slot) for slot, reason in skips],
+        )
+
+
+def _claim(data: Path, source: str, scheduled_at: int | None, schedule_kind: str | None) -> int | None:
     data.mkdir(parents=True, exist_ok=True)
     now = time.time()
     oldest = _history_start()
     with closing(_connect(data)) as conn, conn:
-        conn.execute(SCHEMA)
-        conn.execute("BEGIN IMMEDIATE")
+        _begin_write(conn)
+        if scheduled_at is not None and schedule_kind != "retry" and conn.execute(
+            "SELECT 1 FROM runs WHERE scheduled_at = ? AND schedule_kind != 'retry'", (scheduled_at,)
+        ).fetchone():
+            return None
         active = conn.execute("SELECT id, runner_pid FROM runs WHERE status = 'running'").fetchone()
         if active:
             if process_alive(active["runner_pid"]):
@@ -77,8 +121,9 @@ def _claim(data: Path, source: str) -> int | None:
             conn.execute("UPDATE runs SET status = 'interrupted', finished_at = ? WHERE id = ?", (now, active["id"]))
         conn.execute("DELETE FROM runs WHERE started_at < ? AND id != (SELECT MAX(id) FROM runs)", (oldest,))
         cursor = conn.execute(
-            "INSERT INTO runs(source, started_at, status, runner_pid) VALUES (?, ?, 'running', ?)",
-            (source, now, os.getpid()),
+            """INSERT INTO runs(source, started_at, status, runner_pid, scheduled_at, schedule_kind)
+               VALUES (?, ?, 'running', ?, ?, ?)""",
+            (source, now, os.getpid(), scheduled_at, schedule_kind),
         )
         return cursor.lastrowid
 
@@ -87,10 +132,13 @@ def _view(row: sqlite3.Row) -> dict:
     status = row["status"]
     if status == "running" and not process_alive(row["runner_pid"]):
         status = "interrupted"
+    fields = row.keys()
     return {
         "id": row["id"], "source": row["source"], "startedAt": row["started_at"],
         "finishedAt": row["finished_at"], "status": status, "exitCode": row["exit_code"],
         "accounts": json.loads(row["accounts"]), "points": row["points"], "reason": row["reason"],
+        "scheduledAt": row["scheduled_at"] if "scheduled_at" in fields else None,
+        "scheduleKind": row["schedule_kind"] if "schedule_kind" in fields else None,
     }
 
 
@@ -111,11 +159,15 @@ def read(data: Path, *, latest: bool = False) -> list[dict]:
         return [_view(row) for row in rows]
 
 
-def launch(source: str, *, env: dict, output=subprocess.DEVNULL) -> subprocess.Popen | None:
+def launch(source: str, *, env: dict, output=subprocess.DEVNULL,
+           scheduled_at: int | None = None, schedule_kind: str | None = None) -> subprocess.Popen | None:
     requested_at = time.time()
     data = Path(env["REWARDS_DATA_DIR"])
+    command = [sys.executable, str(Path(__file__).resolve()), source]
+    if scheduled_at is not None and schedule_kind is not None:
+        command += ["--scheduled-at", str(scheduled_at), "--schedule-kind", schedule_kind]
     proc = subprocess.Popen(
-        [sys.executable, str(Path(__file__).resolve()), source],
+        command,
         cwd=ROOT, env=env, stdout=output, stderr=subprocess.STDOUT,
         creationflags=NO_WINDOW | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
     )
@@ -265,8 +317,8 @@ def _notify(data: Path, source: str, status: str, accounts: list[dict]) -> None:
             pass
 
 
-def run(data: Path, source: str) -> int:
-    run_id = _claim(data, source)
+def run(data: Path, source: str, scheduled_at: int | None = None, schedule_kind: str | None = None) -> int:
+    run_id = _claim(data, source, scheduled_at, schedule_kind)
     if run_id is None:
         return BUSY_EXIT
     code, reason = 1, None
@@ -304,7 +356,11 @@ def run(data: Path, source: str) -> int:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("source", choices=(*SOURCES, "auto"))
+    parser.add_argument("--scheduled-at", type=int)
+    parser.add_argument("--schedule-kind", choices=("on_time", "catch_up", "retry"))
     options = parser.parse_args()
+    if (options.scheduled_at is None) != (options.schedule_kind is None):
+        parser.error("--scheduled-at and --schedule-kind must be supplied together")
     data = Path(os.environ.get("REWARDS_DATA_DIR") or ROOT / "data").resolve()
     source = options.source
     if source == "auto":
@@ -313,4 +369,4 @@ if __name__ == "__main__":
             source = "boot" if schedule.get("mode") == "boot" else "manual"
         except (OSError, ValueError, AttributeError):
             source = "manual"
-    raise SystemExit(run(data, source))
+    raise SystemExit(run(data, source, options.scheduled_at, options.schedule_kind))
