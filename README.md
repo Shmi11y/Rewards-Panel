@@ -2,6 +2,16 @@
 
 Rewards 面板是基于开源项目 Microsoft-Rewards-Script 的 Windows 桌面 GUI，用于管理 Microsoft Rewards 账号、查看积分和日志、配置任务及安排定时运行。界面通过 pywebview 显示为本地桌面窗口。[Microsoft-Rewards-Script](https://github.com/TheNetsky/Microsoft-Rewards-Script)
 
+## 下载 Windows x64 便携版
+
+**[下载 Rewards Panel 便携包](https://github.com/Shmi11y/rewards-panel/releases/latest/download/RewardsPanel-windows-x64-portable.zip)**
+
+1. 将 ZIP 完整解压到本机可写入的目录。
+2. 双击解压目录里的 `Rewards.bat`。
+3. **首次启动请保持联网。** 程序会自动下载 Chromium 到 `browser/`，后续启动会直接复用。
+
+便携包已包含 Python、Node.js 和 WebView2。进入面板后，打开「账号 → 添加账号」完成首次登录。已在 Windows 11 x64 验证启动。
+
 | 浅色 | 深色 |
 |---|---|
 | ![总览](docs/home.png) | ![深色](docs/home-dark.png) |
@@ -18,10 +28,6 @@ Rewards 面板是基于开源项目 Microsoft-Rewards-Script 的 Windows 桌面 
 - **定时**：手动 / 每天 / 开机 三种模式；每天最多 4 个时间点；仅工作日；失败自动重试；今天跳过
 - **安全**：账号密码用 Windows DPAPI 加密存盘；本地接口需令牌；密码永不出现在接口响应里
 - **体验**：深浅色主题、窗口尺寸记忆、单实例、无边框窗口、托盘残留的“Python”问题已修
-
-## Windows 便携版
-
-使用 Windows 10/11 x64。将 `RewardsPanel-windows-x64-portable.zip` 完整解压到本机可写入的目录，再双击 `Rewards.bat`。便携包内含 Python、Node.js 和 WebView2。首次启动需要联网，程序会自动下载 Chromium 到 `browser/`，后续启动直接使用这份内核。进入面板后，打开「账号 → 添加账号」完成首次登录。
 
 ## 从源码运行
 
