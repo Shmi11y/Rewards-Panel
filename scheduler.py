@@ -160,7 +160,7 @@ def _loop() -> None:
         while True:
             try:
                 sched = schedule.load()
-                mode = sched["mode"]
+                mode = "manual" if sched["paused"] else sched["mode"]
                 now = datetime.now()
                 retry_left = max(0, min(MAX_RETRY, int(sched.get("retry", 0) or 0)))
 

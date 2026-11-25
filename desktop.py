@@ -7,7 +7,7 @@ Rewards 桌面外壳（无边框窗口）
     1. 注入环境变量，按需拉起后端（8765）
     2. 单实例：已有窗口则激活它并退出
     3. 记住窗口位置尺寸（data/prefs.json 的 win）
-    4. 关窗即退出，退出前把在跑的任务停掉
+    4. 按设置关窗退出或保留在系统托盘
     5. 设置窗口 / 任务栏图标
 
 拖动只发生在顶栏（页面自己派的 begin_drag 请求），页面其它地方不响应。
@@ -42,10 +42,11 @@ DEFAULT_SIZE = (1320, 900)
 MIN_SIZE = (1040, 700)
 ICO = ROOT / "assets" / "icon.ico"
 PNG = ROOT / "assets" / "icon.png"
-PREFS = ROOT / "data" / "prefs.json"
-TOKEN_FILE = ROOT / "data" / ".api-token"
+DATA = Path(os.environ["REWARDS_DATA_DIR"]).resolve()
+PREFS = DATA / "prefs.json"
+TOKEN_FILE = DATA / ".api-token"
 
-STATE = {"quitting": False}
+STATE = {"quitting": False, "hidden": False}
 
 
 # ---------------------------------------------------------------- 基础设施
@@ -66,9 +67,9 @@ def port_open(port: int) -> bool:
 
 
 def start_backend() -> None:
+    sys.path.insert(0, str(ROOT / "panel"))
     if port_open(PORT):
         return
-    sys.path.insert(0, str(ROOT / "panel"))
     import server  # noqa: PLC0415
 
     threading.Thread(target=server.main, daemon=True).start()
@@ -91,14 +92,14 @@ def page_url() -> str:
     return f"{URL}/?k={t}" if t else URL
 
 
-def api(path: str, method: str = "GET", body: dict | None = None) -> dict:
+def api(path: str, method: str = "GET", body: dict | None = None, *, timeout: float = 8) -> dict:
     t = token()
     url = f"{URL}{path}{'&' if '?' in path else '?'}k={t}" if t else f"{URL}{path}"
     try:
         data = json.dumps(body).encode() if body is not None else None
         req = urllib.request.Request(url, data=data, method=method,
                                      headers={"Content-Type": "application/json"})
-        with urllib.request.urlopen(req, timeout=8) as resp:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
             return json.loads(resp.read().decode("utf-8"))
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "msg": str(exc)}
@@ -106,6 +107,37 @@ def api(path: str, method: str = "GET", body: dict | None = None) -> dict:
 
 def task_running() -> bool:
     return bool(api("/api/status").get("running"))
+
+
+def stop_task() -> None:
+    if task_running():
+        api("/api/stop", "POST", {})
+
+
+def keep_in_tray() -> bool:
+    return api("/api/prefs", timeout=2).get("keepInTray") is True
+
+
+def bind_window_actions(open_panel, close_panel) -> None:
+    import server
+
+    server._local_open = open_panel
+    server._local_close = close_panel
+
+
+def make_tray(open_panel, exit_app):
+    try:
+        from windows_tray import Tray
+    except ImportError as exc:
+        _log(f"托盘不可用: {exc}")
+        return None
+
+    def pause_schedule(paused: bool) -> None:
+        result = api("/api/schedule/pause", "POST", {"paused": paused})
+        if not result.get("ok"):
+            _log("无法更新定时暂停状态")
+
+    return Tray(ICO, open_panel, lambda: api("/api/schedule", timeout=2), pause_schedule, exit_app, _log)
 
 
 def ensure_shortcut() -> None:
@@ -125,13 +157,21 @@ def ensure_shortcut() -> None:
 # ---------------------------------------------------------------- 单实例
 
 def activate_existing() -> bool:
+    if port_open(PORT) and api("/api/window/open", "POST", {}, timeout=2).get("ok"):
+        return True
     user32 = ctypes.windll.user32
     hwnd = user32.FindWindowW(None, TITLE)
     if not hwnd:
         return False
-    user32.ShowWindow(hwnd, 9)          # SW_RESTORE
-    user32.SetForegroundWindow(hwnd)
+    foreground(hwnd)
     return True
+
+
+def foreground(hwnd: int) -> None:
+    user32 = ctypes.windll.user32
+    if user32.IsIconic(hwnd) or not user32.IsWindowVisible(hwnd):
+        user32.ShowWindow(hwnd, 9)      # SW_RESTORE
+    user32.SetForegroundWindow(hwnd)
 
 
 # ---------------------------------------------------------------- 窗口几何
@@ -172,8 +212,8 @@ def learn_delta(window, requested: tuple[int, int]) -> None:
             return
         data = json.loads(PREFS.read_text(encoding="utf-8")) if PREFS.exists() else {}
         if data.get("winDelta") != {"w": dw, "h": dh}:
-            data["winDelta"] = {"w": dw, "h": dh}
-            PREFS.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+            import server
+            server.save_prefs({"winDelta": {"w": dw, "h": dh}})
             _log(f"窗口边框补偿: w+{dw} h+{dh}")
     except Exception:
         pass
@@ -194,9 +234,8 @@ def save_geometry(window, force: bool = False) -> None:
             close_size = abs(cur["w"] - int(old.get("w", 0))) < 40 and abs(cur["h"] - int(old.get("h", 0))) < 40
             if same_pos and close_size:
                 return
-        data["win"] = cur
-        PREFS.parent.mkdir(parents=True, exist_ok=True)
-        PREFS.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        import server
+        server.save_prefs({"win": cur})
     except Exception as exc:  # noqa: BLE001
         _log(f"保存窗口尺寸失败: {exc}")
 
@@ -281,11 +320,9 @@ class Api:
     def __init__(self) -> None:
         self._win = None
         self._maxed = False
-        self._on_close = None
 
-    def attach(self, window, on_close=None) -> None:
+    def attach(self, window) -> None:
         self._win = window
-        self._on_close = on_close
 
     def minimize(self) -> bool:
         if self._win:
@@ -314,12 +351,7 @@ class Api:
         return True
 
     def close(self) -> bool:
-        """页面上的 ✕：先清理（停任务、存几何），再真正销毁窗口"""
-        try:
-            if self._on_close:
-                self._on_close()        # 只做清理，返回值是给原生事件用的，这里不用
-        except Exception:
-            pass
+        """页面的关闭按钮走同一个原生关窗事件。"""
         if self._win:
             try:
                 self._win.destroy()
@@ -357,14 +389,62 @@ def fallback_chromium() -> int:
     x, y, w, h = load_geometry()
     args = [str(found[-1]), f"--app={page_url()}",
             f"--user-data-dir={ROOT / 'ui-profile'}",
-            f"--window-size={w},{h}", "--no-first-run", "--no-default-browser-check"]
+            f"--window-size={w},{h}", "--no-first-run", "--no-default-browser-check", "--disable-background-mode"]
     if x >= 0 and y >= 0:
         args.append(f"--window-position={x},{y}")
+    wake = threading.Event()
+    browser = None
+
+    def browser_window() -> int:
+        if not browser or browser.poll() is not None:
+            return 0
+        try:
+            import win32gui
+            import win32process
+        except ImportError:
+            return 0
+        found_windows = []
+
+        def collect(hwnd, _):
+            if (win32gui.IsWindowVisible(hwnd) and win32gui.GetClassName(hwnd) == "Chrome_WidgetWin_1"
+                    and win32process.GetWindowThreadProcessId(hwnd)[1] == browser.pid):
+                found_windows.append(hwnd)
+
+        win32gui.EnumWindows(collect, None)
+        return next(iter(found_windows), 0)
+
+    def open_panel() -> None:
+        hwnd = browser_window()
+        if hwnd:
+            foreground(hwnd)
+        elif browser and browser.poll() is not None:
+            wake.set()
+
+    def close_panel() -> None:
+        if hwnd := browser_window():
+            ctypes.windll.user32.PostMessageW(hwnd, 0x0010, 0, 0)  # WM_CLOSE
+
+    def exit_app() -> None:
+        STATE["quitting"] = True
+        wake.set()
+
+    tray = make_tray(open_panel, exit_app)
+    bind_window_actions(open_panel, close_panel)
+    code = 0
     try:
-        return subprocess.call(args)
+        while not STATE["quitting"]:
+            wake.clear()
+            browser = subprocess.Popen(args)
+            code = browser.wait()
+            if code or not tray or not keep_in_tray() or not tray.start():
+                break
+            wake.wait()
+            tray.close()
+        return code
     finally:
-        if task_running():
-            api("/api/stop", "POST", {})
+        if tray:
+            tray.close()
+        stop_task()
 
 
 def main() -> int:
@@ -404,18 +484,45 @@ def main() -> int:
         print(f"WebView2 启动失败（{exc}），改用内置浏览器窗口")
         return fallback_chromium()
 
-    def on_closing():
-        """关窗即退出；任务在跑就先停掉，避免留下看不见的孤儿进程"""
+    def open_panel() -> None:
+        if STATE["quitting"]:
+            return
+        window.show()
+        if hwnd := ctypes.windll.user32.FindWindowW(None, TITLE):
+            foreground(hwnd)
+        STATE["hidden"] = False
+        if tray:
+            tray.close()
+
+    def exit_app() -> None:
+        STATE["quitting"] = True
+        stop_task()
+        api_obj.close()
+
+    tray = make_tray(open_panel, exit_app)
+
+    def on_closing(allow_tray: bool = True) -> bool:
         if STATE["quitting"]:
             return True
+        if not STATE["hidden"]:
+            save_geometry(window)
+        if allow_tray and tray and keep_in_tray() and tray.start():
+            window.hide()
+            STATE["hidden"] = True
+            return False
         STATE["quitting"] = True
-        try:
-            if task_running():
-                api("/api/stop", "POST", {})
-        except Exception:
-            pass
-        save_geometry(window)
+        stop_task()
         return True
+
+    def native_closing(_sender, args) -> None:
+        if not on_closing(str(args.CloseReason) == "UserClosing"):
+            args.Cancel = True
+
+    def bind_closing() -> None:
+        if hasattr(getattr(window, "native", None), "FormClosing"):
+            window.native.FormClosing += native_closing
+        else:
+            window.events.closing += lambda: on_closing()
 
     def geometry_keeper():
         """每 3 秒比对一次窗口位置尺寸，变化就写盘（不依赖关闭事件）"""
@@ -423,7 +530,7 @@ def main() -> int:
         while True:
             time.sleep(3)
             try:
-                if getattr(window, "maximized", False) or getattr(window, "fullscreen", False):
+                if STATE["hidden"] or getattr(window, "maximized", False) or getattr(window, "fullscreen", False):
                     continue
                 cur = (int(window.x), int(window.y), int(window.width), int(window.height))
                 if cur != last:
@@ -434,16 +541,15 @@ def main() -> int:
 
     threading.Timer(1.5, lambda: learn_delta(window, (w, h))).start()
     threading.Thread(target=geometry_keeper, daemon=True).start()
-    api_obj.attach(window, on_close=on_closing)
-    try:
-        import server as _srv  # noqa: PLC0415
-        _srv._local_close = api_obj.close
-    except Exception:
-        pass
+    api_obj.attach(window)
+    bind_window_actions(open_panel, api_obj.close)
     threading.Thread(target=apply_icon, daemon=True).start()
 
     try:
-        window.events.closing += on_closing
+        if hasattr(window.events, "before_show"):
+            window.events.before_show += bind_closing
+        else:
+            window.events.closing += lambda: on_closing()
         _log("关闭事件已注册")
     except Exception as exc:  # noqa: BLE001
         _log(f"关闭事件注册失败: {exc}")
@@ -452,7 +558,12 @@ def main() -> int:
         webview.start()
     except Exception as exc:  # noqa: BLE001
         _log(f"桌面窗口启动失败（{exc}），改用内置浏览器窗口")
+        if tray:
+            tray.close()
         return fallback_chromium()
+    finally:
+        if tray:
+            tray.close()
     return 0
 
 

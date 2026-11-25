@@ -318,6 +318,12 @@ def _notify(data: Path, source: str, status: str, accounts: list[dict]) -> None:
 
 
 def run(data: Path, source: str, scheduled_at: int | None = None, schedule_kind: str | None = None) -> int:
+    if source in ("daily", "boot"):
+        settings = _saved_schedule(data)
+        active_after = settings.get("activeAfter")
+        past_plan = scheduled_at is not None and type(active_after) in (int, float) and scheduled_at < active_after
+        if settings.get("paused") is True or past_plan:
+            return 0 if source == "boot" else BUSY_EXIT
     run_id = _claim(data, source, scheduled_at, schedule_kind)
     if run_id is None:
         return BUSY_EXIT
@@ -353,6 +359,14 @@ def run(data: Path, source: str, scheduled_at: int | None = None, schedule_kind:
     return code
 
 
+def _saved_schedule(data: Path) -> dict:
+    try:
+        settings = json.loads((data / "schedule.json").read_text(encoding="utf-8"))
+        return settings if isinstance(settings, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("source", choices=(*SOURCES, "auto"))
@@ -364,9 +378,5 @@ if __name__ == "__main__":
     data = Path(os.environ.get("REWARDS_DATA_DIR") or ROOT / "data").resolve()
     source = options.source
     if source == "auto":
-        try:
-            schedule = json.loads((data / "schedule.json").read_text(encoding="utf-8"))
-            source = "boot" if schedule.get("mode") == "boot" else "manual"
-        except (OSError, ValueError, AttributeError):
-            source = "manual"
+        source = "boot" if _saved_schedule(data).get("mode") == "boot" else "manual"
     raise SystemExit(run(data, source, options.scheduled_at, options.schedule_kind))

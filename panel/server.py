@@ -56,7 +56,9 @@ import run_history
 SESSION_DB = DATA_DIR / "sessions" / "sessions.db"
 CONFIG_FILE = DATA_DIR / "config.json"
 PREFS_FILE = DATA_DIR / "prefs.json"
-PREFS_DEFAULT = {"theme": "light", "onlyActive": False}
+PREFS_DEFAULT = {"theme": "light", "onlyActive": False, "keepInTray": False}
+_prefs_lock = threading.RLock()
+_schedule_lock = threading.Lock()
 TOKEN_FILE = DATA_DIR / ".api-token"
 
 
@@ -205,30 +207,40 @@ def purge_old_profiles() -> int:
     return n
 
 
-def get_prefs() -> dict:
-    out = dict(PREFS_DEFAULT)
+def _read_prefs() -> dict:
     try:
         got = json.loads(PREFS_FILE.read_text(encoding="utf-8"))
         if isinstance(got, dict):
-            out.update({k: got[k] for k in PREFS_DEFAULT if k in got})
-    except Exception:
+            return got
+    except (OSError, ValueError):
         pass
-    return out
+    return {}
+
+
+def get_prefs() -> dict:
+    with _prefs_lock:
+        stored = _read_prefs()
+        return {key: stored.get(key, default) for key, default in PREFS_DEFAULT.items()}
+
+
+def save_prefs(patch: dict) -> None:
+    with _prefs_lock:
+        stored = _read_prefs()
+        stored.update(patch)
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        PREFS_FILE.write_text(json.dumps(stored, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def set_prefs(patch: dict) -> dict:
     if not isinstance(patch, dict):
         return {"ok": False, "msg": "参数不对"}
-    cur = get_prefs()
-    for k in PREFS_DEFAULT:
-        if k in patch:
-            cur[k] = patch[k]
+    if "keepInTray" in patch and type(patch["keepInTray"]) is not bool:
+        return {"ok": False, "msg": "托盘设置须为布尔值"}
     try:
-        DATA_DIR.mkdir(parents=True, exist_ok=True)
-        PREFS_FILE.write_text(json.dumps(cur, ensure_ascii=False, indent=2), encoding="utf-8")
-    except Exception as exc:  # noqa: BLE001
+        save_prefs({key: patch[key] for key in PREFS_DEFAULT if key in patch})
+    except OSError as exc:
         return {"ok": False, "msg": str(exc)}
-    return {"ok": True, "prefs": cur}
+    return {"ok": True, "prefs": get_prefs()}
 
 
 def all_actions(limit: int = 800) -> dict:
@@ -422,6 +434,7 @@ _lock = threading.RLock()
 _cache = {"key": None, "data": None}
 _ui_state: dict = {}
 _local_close = None   # 由桌面外壳注入，用于关闭窗口
+_local_open = None
 _stop_mark: float = 0.0   # 上次手动停止时日志的 mtime，用来压掉"刚跑完仍显示运行中"
 
 RE_TS = re.compile(r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\.\d+ ")
@@ -883,10 +896,11 @@ class Handler(BaseHTTPRequestHandler):
             result = set_config_batch(body.get("items") or {})
         elif self.path == "/api/browser/install":
             result = install_browser()
-        elif self.path == "/api/window/close":
-            if _local_close:
+        elif self.path in ("/api/window/close", "/api/window/open"):
+            action = _local_close if self.path.endswith("/close") else _local_open
+            if action:
                 result = {"ok": True}
-                threading.Timer(0.15, _local_close).start()
+                threading.Timer(0.15, action).start()
             else:
                 result = {"ok": False, "msg": "当前非桌面模式"}
         elif self.path == "/api/cache/clean":
@@ -903,18 +917,23 @@ class Handler(BaseHTTPRequestHandler):
             if result.get("ok"):
                 acct.write_env()
         elif self.path == "/api/schedule/skip":
-            result = sched_mod.skip_today()
+            with _schedule_lock:
+                result = sched_mod.skip_today()
+        elif self.path == "/api/schedule/pause":
+            with _schedule_lock:
+                result = sched_mod.set_paused(body.get("paused"))
         elif self.path == "/api/ui":
             _ui_state.clear()
             _ui_state.update(body if isinstance(body, dict) else {})
             result = {"ok": True}
         elif self.path == "/api/schedule":
-            result = sched_mod.update(str(body.get("mode", "manual")),
-                                      body.get("times") or body.get("time"),
-                                      body.get("retry"),
-                                      body.get("weekdaysOnly"),
-                                      body.get("catchUpMode"),
-                                      body.get("catchUpMinutes"))
+            with _schedule_lock:
+                result = sched_mod.update(str(body.get("mode", "manual")),
+                                          body.get("times") or body.get("time"),
+                                          body.get("retry"),
+                                          body.get("weekdaysOnly"),
+                                          body.get("catchUpMode"),
+                                          body.get("catchUpMinutes"))
         else:
             self._send(404, b"not found", "text/plain")
             return

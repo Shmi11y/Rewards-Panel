@@ -524,6 +524,10 @@
             
           </div>
         </div>
+        <div class="card">
+          <h2>窗口</h2>
+          <label class="chk"><input type="checkbox" id="keepInTray">关闭窗口后留在托盘</label>
+        </div>
         </div>
         <div class="pane" data-pane="t3">
         <div class="row c2">
@@ -564,6 +568,7 @@
               <button class="primary" id="schSave">保存定时</button>
               <button class="ghost" id="schRunNow">立即跑一次</button>
               <button class="ghost" id="schSkip">今天跳过</button>
+              <button class="ghost" id="schResume" hidden>恢复定时</button>
             </div>
             <div class="kv" id="schInfo" style="margin-top:16px"></div>
           </div>
@@ -684,7 +689,7 @@ const PACE = {
           hint:'要跑约 3 小时，一般跑不完。'},
 };
 let STATUS=null, CONFIG=null, DRAFT=null, BUSY=false, PAGE='home', SCH_DIRTY=false, SCH_MODE='manual';
-let SCH_TIMES=['09:10'], LOGS=[], DETAIL=null, PREFS={theme:'light',onlyActive:false}, LAST_DETAIL=0;
+let SCH_TIMES=['09:10'], LOGS=[], DETAIL=null, PREFS={theme:'light',onlyActive:false,keepInTray:false}, LAST_DETAIL=0;
 
 function renderSchedule(sc){
   if(!sc) return;
@@ -698,7 +703,8 @@ function renderSchedule(sc){
   $('schCatchUp').value = sc.catchUpMode || 'latest';
   $('schCatchLimit').value = String(sc.catchUpMinutes ?? 720);
   $('schCatchLimit').disabled = $('schCatchUp').value === 'skip';
-  $('schHint').textContent = SCH_MODE==='manual'
+  $('schResume').hidden = !sc.paused;
+  $('schHint').textContent = sc.paused ? '定时已暂停，可以从这里或托盘菜单恢复。' : SCH_MODE==='manual'
     ? '只在你点「开始任务」时执行'
     : SCH_MODE==='daily'
       ? '守护进程常驻后台，到点自动跑一次。关掉应用也会生效。'
@@ -706,7 +712,7 @@ function renderSchedule(sc){
   const flags = ((sc.daily?'定时 ':'') + (sc.boot?'开机 ':'')).trim() || '未写入';
   const doneList = (sc.doneToday || []);
   const rows = [
-    ['下次运行', sc.nextRun || '—'],
+    ['下次运行', sc.paused ? '已暂停' : sc.nextRun || '—'],
     ['今日已处理', doneList.length ? doneList.join('、') : '—'],
     ['守护进程', sc.daemonAlive ? '运行中' : '未运行'],
     ['开机启动项', flags],
@@ -1213,6 +1219,22 @@ $('onlyActive').onchange=e=>{
     body:JSON.stringify({onlyActive:e.target.checked})}).catch(()=>{});
 };
 
+$('keepInTray').onchange=async e=>{
+  const checkbox=e.target;
+  checkbox.disabled=true;
+  try{
+    const result=await post('/api/prefs',{keepInTray:checkbox.checked});
+    if(!result.ok) throw new Error(result.msg||'保存失败');
+    PREFS=result.prefs;
+    toast(PREFS.keepInTray?'托盘模式已开启':'托盘模式已关闭');
+  }catch(error){
+    checkbox.checked=!!PREFS.keepInTray;
+    toast(error.message||'保存失败');
+  }finally{
+    checkbox.disabled=false;
+  }
+};
+
 async function tick(){
   try{
     const d=await (await fetch('/api/status',{cache:'no-store'})).json();
@@ -1436,7 +1458,10 @@ headerEl.addEventListener('dblclick', e => {
   if (e.target.closest('button,select,input,a,label')) return;
   toggleWinMax();
 });
-document.getElementById('wbClose').onclick=()=>{const a=winApi(); if(a) a.close().catch(()=>{});};
+document.getElementById('wbClose').onclick=()=>{
+  const a=winApi();
+  (a ? a.close() : post('/api/window/close')).catch(()=>{});
+};
 setTimeout(()=>{
   fetch('/api/ui',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({bridge:!!(window.pywebview&&window.pywebview.api),api:Object.keys((window.pywebview&&window.pywebview.api)||{}).join(','),w:innerWidth,h:innerHeight,dpr:devicePixelRatio})}).catch(()=>{});
@@ -1505,6 +1530,12 @@ $('schSkip').onclick = async () => {
   toast(d.ok ? '今天不再自动运行' : (d.msg||'操作失败'));
   renderSchedule(d);
 };
+$('schResume').onclick = async () => {
+  const d=await post('/api/schedule/pause',{paused:false});
+  if(!d.ok) return toast(d.msg||'恢复失败');
+  renderSchedule(d);
+  toast('已恢复定时');
+};
 
 (async () => {
   try{ PREFS = await (await fetch('/api/prefs',{cache:'no-store'})).json(); }catch(e){}
@@ -1512,6 +1543,7 @@ $('schSkip').onclick = async () => {
   const sysDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
   applyTheme(ls || PREFS.theme || (sysDark ? 'dark' : 'light'), false);
   $('onlyActive').checked = !!PREFS.onlyActive;
+  $('keepInTray').checked = !!PREFS.keepInTray;
   nav('home'); tick(); setInterval(tick, 2500);
 })();
 </script>

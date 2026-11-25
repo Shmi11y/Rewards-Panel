@@ -40,7 +40,8 @@ BOOT_BAT = STARTUP_DIR / "RewardsBoot.bat"
 DAEMON_BAT = STARTUP_DIR / "RewardsScheduler.bat"
 
 DEFAULTS = {"mode": "manual", "times": ["09:10"], "done": {}, "bootDelay": 60,
-            "retry": 0, "weekdaysOnly": False, "catchUpMode": "latest", "catchUpMinutes": 720}
+            "retry": 0, "weekdaysOnly": False, "catchUpMode": "latest", "catchUpMinutes": 720,
+            "paused": False}
 MAX_TIMES = 4
 MAX_CATCH_UP_MINUTES = 1440
 
@@ -108,6 +109,7 @@ def load() -> dict:
         data["catchUpMode"] = DEFAULTS["catchUpMode"]
     if type(data["catchUpMinutes"]) is not int or not 1 <= data["catchUpMinutes"] <= MAX_CATCH_UP_MINUTES:
         data["catchUpMinutes"] = DEFAULTS["catchUpMinutes"]
+    data["paused"] = data["paused"] is True
     return data
 
 
@@ -217,7 +219,7 @@ def stop_daemon() -> bool:
 
 def next_run_text(data: dict, now: datetime, done: list[str]) -> str | None:
     mode = data.get("mode", "manual")
-    if mode == "manual":
+    if mode == "manual" or data.get("paused"):
         return None
     if mode == "boot":
         return "下次开机登录后约 1 分钟"
@@ -248,6 +250,7 @@ def status() -> dict:
         "bootDelay": data.get("bootDelay", 60),
         "catchUpMode": data["catchUpMode"],
         "catchUpMinutes": data["catchUpMinutes"],
+        "paused": data["paused"],
         "nextRun": next_run_text(data, now, done),
         "daemonAlive": _pid_alive(daemon_pid()),
         "pythonw": find_pythonw(),
@@ -283,6 +286,8 @@ def update(mode: str, times=None, retry=None, weekdays_only=None, catch_up_mode=
             return {"ok": False, "msg": f"补跑时限须为 1 到 {MAX_CATCH_UP_MINUTES} 分钟"}
         data["catchUpMinutes"] = catch_up_minutes
     data["mode"] = mode
+    if mode != previous_plan[0]:
+        data["paused"] = False
     if (mode, data["times"], data["weekdaysOnly"]) != previous_plan:
         data["activeAfter"] = time.time()
     save(data)
@@ -296,6 +301,23 @@ def update(mode: str, times=None, retry=None, weekdays_only=None, catch_up_mode=
     out["ok"] = True
     out["startup"] = st
     return out
+
+
+def set_paused(paused: bool) -> dict:
+    if type(paused) is not bool:
+        return {"ok": False, "msg": "暂停设置须为布尔值"}
+    data = load()
+    if data["mode"] not in ("daily", "boot"):
+        return {"ok": False, "msg": "尚未启用自动运行"}
+    if not paused and data["mode"] == "daily" and not ensure_daemon():
+        return {"ok": False, "msg": "定时守护未能启动"}
+    if paused != data["paused"]:
+        data["paused"] = paused
+        if not paused:
+            # Intentional pause time should not become missed runs on resume.
+            data["activeAfter"] = time.time()
+        save(data)
+    return {"ok": True, **status()}
 
 
 def skip_today() -> dict:
