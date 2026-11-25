@@ -458,6 +458,7 @@ def main() -> int:
 
     try:
         import webview  # noqa: PLC0415
+        webview.settings["ALLOW_DOWNLOADS"] = True
         runtime = bundled_webview_runtime()
         if runtime is not None:
             webview.settings["WEBVIEW2_RUNTIME_PATH"] = str(runtime)

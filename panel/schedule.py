@@ -292,15 +292,17 @@ def update(mode: str, times=None, retry=None, weekdays_only=None, catch_up_mode=
         data["activeAfter"] = time.time()
     save(data)
 
-    st = apply_startup(mode)
+    startup = sync_automation(mode)
+    return {**status(), "ok": True, "startup": startup}
+
+
+def sync_automation(mode: str) -> dict:
+    startup = apply_startup(mode)
     if mode == "daily":
         ensure_daemon()
     else:
         stop_daemon()
-    out = status()
-    out["ok"] = True
-    out["startup"] = st
-    return out
+    return startup
 
 
 def set_paused(paused: bool) -> dict:

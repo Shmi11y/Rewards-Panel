@@ -24,6 +24,9 @@ import time
 from datetime import datetime
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
+from tempfile import NamedTemporaryFile
+from urllib.error import HTTPError
+from urllib.request import Request, urlopen
 
 ROOT = Path(os.environ.get("REWARDS_APP_ROOT") or Path(__file__).resolve().parent.parent)
 HOME = ROOT / "app"
@@ -59,6 +62,7 @@ PREFS_FILE = DATA_DIR / "prefs.json"
 PREFS_DEFAULT = {"theme": "light", "onlyActive": False, "keepInTray": False}
 _prefs_lock = threading.RLock()
 _schedule_lock = threading.Lock()
+_config_lock = threading.Lock()
 TOKEN_FILE = DATA_DIR / ".api-token"
 
 
@@ -121,6 +125,19 @@ CONFIG_KEYS = [
 ]
 
 ALL_KEYS = CONFIG_KEYS + STR_KEYS
+BACKUP_FORMAT = 1
+BACKUP_MAX_BYTES = 64 * 1024
+SCHEDULE_BACKUP_KEYS = ("mode", "times", "retry", "weekdaysOnly", "catchUpMode",
+                        "catchUpMinutes", "paused", "bootDelay")
+RELEASE_API = "https://api.github.com/repos/Shmi11y/rewards-panel/releases/latest"
+RELEASE_PAGE = "https://github.com/Shmi11y/rewards-panel/releases"
+RELEASE_VERSION = re.compile(r"v?([0-9]{1,9})\.([0-9]{1,9})\.([0-9]{1,9})")
+_DURATION = re.compile(
+    r"([0-9]+(?:\.[0-9]+)?|\.[0-9]+) *(milliseconds?|msecs?|ms|seconds?|secs?|s|"
+    r"minutes?|mins?|m|hours?|hrs?|h|days?|d|weeks?|w|years?|yrs?|y)?", re.IGNORECASE)
+_DURATION_UNITS = {"s": 1000, "m": 60_000, "h": 3_600_000, "d": 86_400_000,
+                   "w": 604_800_000, "y": 31_557_600_000}
+_DURATION_LIMIT = 2_147_483_647
 
 
 def prune_old_logs(keep_days: int = 30) -> dict:
@@ -227,8 +244,7 @@ def save_prefs(patch: dict) -> None:
     with _prefs_lock:
         stored = _read_prefs()
         stored.update(patch)
-        DATA_DIR.mkdir(parents=True, exist_ok=True)
-        PREFS_FILE.write_text(json.dumps(stored, ensure_ascii=False, indent=2), encoding="utf-8")
+        _write_settings(PREFS_FILE, stored)
 
 
 def set_prefs(patch: dict) -> dict:
@@ -286,19 +302,178 @@ def set_config_batch(items: dict) -> dict:
     if not CONFIG_FILE.exists():
         return {"ok": False, "msg": "config.json 不存在"}
     try:
-        data = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
-        for path, value in items.items():
-            node = data
-            parts = path.split(".")
-            for part in parts[:-1]:
-                if not isinstance(node.get(part), dict):
-                    node[part] = {}
-                node = node[part]
-            node[parts[-1]] = value
-        CONFIG_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=4), encoding="utf-8")
+        with _config_lock:
+            data = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+            _merge_task_settings(data, items)
+            _write_settings(CONFIG_FILE, data, indent=4)
         return {"ok": True, "changed": len(items)}
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "msg": str(exc)}
+
+
+def _merge_task_settings(data: dict, items: dict) -> None:
+    for path, value in items.items():
+        node = data
+        parts = path.split(".")
+        for part in parts[:-1]:
+            if not isinstance(node.get(part), dict):
+                node[part] = {}
+            node = node[part]
+        node[parts[-1]] = value
+
+
+def _replace_file(path: Path, content: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with NamedTemporaryFile(dir=path.parent, delete=False) as stream:
+        staging = Path(stream.name)
+        try:
+            stream.write(content)
+            stream.close()
+            staging.replace(path)
+        finally:
+            stream.close()
+            staging.unlink(missing_ok=True)
+
+
+def _write_settings(path: Path, data: dict, indent: int = 2) -> None:
+    _replace_file(path, json.dumps(data, ensure_ascii=False, indent=indent).encode("utf-8"))
+
+
+def _duration_ms(value):
+    if type(value) in (int, float):
+        return value
+    if isinstance(value, str) and len(value) <= 100 and (match := _DURATION.fullmatch(value)):
+        number, unit = match.groups()
+        unit = (unit or "ms").lower()
+        multiplier = 1 if unit.startswith(("ms", "millisecond")) else _DURATION_UNITS[unit[0]]
+        return float(number) * multiplier
+    return -1
+
+
+def _validate_delay_ranges(tasks: dict) -> None:
+    for delay in ("searchDelay", "readDelay"):
+        lo = tasks.get(f"searchSettings.{delay}.min")
+        hi = tasks.get(f"searchSettings.{delay}.max")
+        if lo is not None and hi is not None and _duration_ms(lo) > _duration_ms(hi):
+            raise ValueError(f"最大间隔不能小于最小间隔（{delay}）")
+
+
+def _validate_backup(body: dict) -> None:
+    if (not isinstance(body, dict) or set(body) != {"formatVersion", "tasks", "schedule", "interface"}
+            or type(body["formatVersion"]) is not int or body["formatVersion"] != BACKUP_FORMAT):
+        raise ValueError("无法识别的设置备份格式或版本")
+    tasks, plan, prefs = body["tasks"], body["schedule"], body["interface"]
+    if not isinstance(tasks, dict) or set(tasks).difference(ALL_KEYS):
+        raise ValueError("备份包含不支持的任务设置")
+    for key, value in tasks.items():
+        if key in CONFIG_KEYS:
+            valid = type(value) is bool
+        elif key == "clusters":
+            valid = type(value) is int and 1 <= value <= 8
+        elif key == "browserChannel":
+            valid = value in ("", "chromium", "chrome", "msedge")
+        else:
+            valid = 0 <= _duration_ms(value) <= _DURATION_LIMIT
+        if not valid:
+            raise ValueError(f"任务设置格式或取值不合法（{key}）")
+    _validate_delay_ranges(tasks)
+
+    if (not isinstance(plan, dict) or set(plan) != set(SCHEDULE_BACKUP_KEYS)
+            or plan["mode"] not in ("manual", "daily", "boot")
+            or not isinstance(plan["times"], list) or not 1 <= len(plan["times"]) <= sched_mod.MAX_TIMES
+            or any(not isinstance(slot, str) or not re.fullmatch(r"(?:[01][0-9]|2[0-3]):[0-5][0-9]", slot)
+                   for slot in plan["times"])
+            or len(set(plan["times"])) != len(plan["times"])
+            or type(plan["retry"]) is not int or not 0 <= plan["retry"] <= 2
+            or type(plan["weekdaysOnly"]) is not bool or type(plan["paused"]) is not bool
+            or plan["catchUpMode"] not in ("latest", "skip")
+            or type(plan["catchUpMinutes"]) is not int
+            or not 1 <= plan["catchUpMinutes"] <= sched_mod.MAX_CATCH_UP_MINUTES
+            or type(plan["bootDelay"]) is not int or not 0 <= plan["bootDelay"] <= 86_400):
+        raise ValueError("定时计划格式或取值不合法")
+    if (not isinstance(prefs, dict) or set(prefs) != set(PREFS_DEFAULT)
+            or prefs["theme"] not in ("light", "dark")
+            or any(type(prefs[key]) is not bool for key in ("onlyActive", "keepInTray"))):
+        raise ValueError("界面偏好格式或取值不合法")
+
+
+def export_settings() -> dict:
+    with _config_lock, _prefs_lock, _schedule_lock:
+        config = get_config()
+        if "error" in config:
+            return {"ok": False, "msg": "无法读取任务设置"}
+        schedule = sched_mod.load()
+        backup = {
+            "formatVersion": BACKUP_FORMAT,
+            "tasks": {key: value for key, value in config["items"].items() if value is not None},
+            "schedule": {key: schedule[key] for key in SCHEDULE_BACKUP_KEYS},
+            "interface": get_prefs(),
+        }
+        try:
+            _validate_backup(backup)
+        except ValueError as exc:
+            return {"ok": False, "msg": str(exc)}
+        return {"ok": True, "backup": backup}
+
+
+def import_settings(backup: dict) -> dict:
+    try:
+        _validate_backup(backup)
+    except ValueError as exc:
+        return {"ok": False, "msg": str(exc)}
+
+    with _config_lock, _prefs_lock, _schedule_lock:
+        saved_files = []
+        try:
+            original_config = CONFIG_FILE.read_bytes()
+            config = json.loads(original_config)
+            original_prefs = PREFS_FILE.read_bytes() if PREFS_FILE.exists() else None
+            prefs = _read_prefs()
+            plan = sched_mod.load()
+            previous_plan = {key: plan[key] for key in SCHEDULE_BACKUP_KEYS}
+            imported_plan = {**backup["schedule"], "times": sorted(backup["schedule"]["times"])}
+            plan_changed = imported_plan != previous_plan
+
+            if backup["tasks"]:
+                _merge_task_settings(config, backup["tasks"])
+                try:
+                    _validate_delay_ranges({key: _dig(config, key) for key in STR_KEYS})
+                except ValueError as exc:
+                    return {"ok": False, "msg": str(exc)}
+                _write_settings(CONFIG_FILE, config, indent=4)
+                saved_files.append((CONFIG_FILE, original_config))
+            prefs.update(backup["interface"])
+            _write_settings(PREFS_FILE, prefs)
+            saved_files.append((PREFS_FILE, original_prefs))
+            if plan_changed:
+                plan.update(imported_plan)
+                plan["activeAfter"] = time.time()
+                sched_mod.save(plan)
+        except (OSError, ValueError, TypeError, AttributeError):
+            rollback_failed = False
+            for path, original in reversed(saved_files):
+                try:
+                    if original is None:
+                        path.unlink(missing_ok=True)
+                    else:
+                        _replace_file(path, original)
+                except OSError:
+                    rollback_failed = True
+            msg = "导入中断，部分设置可能已改变" if rollback_failed else "无法保存设置，导入已取消"
+            return {"ok": False, "msg": msg}
+
+        warning = None
+        if plan_changed:
+            mode = plan["mode"]
+            try:
+                sched_mod.sync_automation(mode)
+            except (OSError, subprocess.SubprocessError):
+                warning = "设置已导入，自动运行未能重新配置。请在「自动运行」中检查。"
+        status = sched_mod.status()
+        if plan_changed and (status["boot"] != (mode == "boot") or status["daily"] != (mode == "daily")
+                             or status["daemonAlive"] != (mode == "daily")):
+            warning = "设置已导入，自动运行未能重新配置。请在「自动运行」中检查。"
+        return {"ok": True, "prefs": get_prefs(), "schedule": status, "warning": warning}
 
 
 def install_browser() -> dict:
@@ -418,8 +593,57 @@ def selftest() -> dict:
                              + " / Edge " + ("有" if sysb["edge"] else "无")})
 
     return {"ok": all(c["ok"] for c in checks), "checks": checks,
-            "version": _app_version(), "dataDir": str(DATA_DIR),
+            "version": _app_version(), "portableVersion": portable_version(), "dataDir": str(DATA_DIR),
             "appDir": str(HOME), "root": str(ROOT)}
+
+
+def portable_version() -> str | None:
+    try:
+        version = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
+        match = RELEASE_VERSION.fullmatch(version)
+        return ".".join(match.groups()) if match else None
+    except (OSError, UnicodeError):
+        return None
+
+
+def check_update() -> dict:
+    current = portable_version()
+    if current is None:
+        return {"ok": False, "msg": "无法识别当前便携版版本"}
+    request = Request(RELEASE_API, headers={"Accept": "application/vnd.github+json", "User-Agent": "RewardsPanel"})
+    try:
+        with urlopen(request, timeout=8) as response:
+            release = json.loads(response.read(512 * 1024))
+        tag = release.get("tag_name") if isinstance(release, dict) else None
+    except HTTPError as exc:
+        if exc.code in (403, 429):
+            tag = _latest_public_tag()
+            if tag is None:
+                return {"ok": False, "msg": "GitHub 暂时限制更新查询，请稍后重试"}
+        elif exc.code == 404:
+            return {"ok": False, "msg": "GitHub 上未找到正式版本"}
+        else:
+            return {"ok": False, "msg": "GitHub 暂时无法提供版本信息"}
+    except OSError:
+        return {"ok": False, "msg": "暂时无法连接 GitHub，请检查网络后重试"}
+    except (ValueError, RecursionError):
+        return {"ok": False, "msg": "无法读取 GitHub 版本信息"}
+    latest = RELEASE_VERSION.fullmatch(tag) if isinstance(tag, str) else None
+    if latest is None:
+        return {"ok": False, "msg": "无法识别 GitHub 上的版本号"}
+    return {"ok": True, "current": current, "latest": ".".join(latest.groups()),
+            "updateAvailable": tuple(map(int, latest.groups())) > tuple(map(int, current.split(".")))}
+
+
+def _latest_public_tag() -> str | None:
+    request = Request(f"{RELEASE_PAGE}/latest", method="HEAD", headers={"User-Agent": "RewardsPanel"})
+    try:
+        with urlopen(request, timeout=5) as response:
+            url = response.geturl()
+    except OSError:
+        return None
+    prefix = f"{RELEASE_PAGE}/tag/"
+    return url.removeprefix(prefix) if url.startswith(prefix) else None
 
 
 def _app_version() -> str:
@@ -773,6 +997,11 @@ class Handler(BaseHTTPRequestHandler):
                 pass
 
     def _route_get(self) -> None:
+        if self.path in ("/api/update/check", "/api/settings/backup"):
+            result = check_update() if self.path == "/api/update/check" else export_settings()
+            self._send(200, json.dumps(result, ensure_ascii=False).encode("utf-8"),
+                       "application/json; charset=utf-8")
+            return
         if self.path.startswith("/api/status"):
             self._send(200, json.dumps(build_status(), ensure_ascii=False).encode("utf-8"),
                        "application/json; charset=utf-8")
@@ -859,13 +1088,20 @@ class Handler(BaseHTTPRequestHandler):
 
     def _route_post(self) -> None:
         length = int(self.headers.get("Content-Length") or 0)
+        if self.path == "/api/settings/backup" and not 0 < length <= BACKUP_MAX_BYTES:
+            result = {"ok": False, "msg": "请选择不超过 64 KB 的 JSON 设置备份"}
+            self._send(413, json.dumps(result, ensure_ascii=False).encode("utf-8"),
+                       "application/json; charset=utf-8")
+            return
         raw = self.rfile.read(length) if length else b""
         try:
             body = json.loads(raw.decode("utf-8")) if raw else {}
         except Exception:
             body = {}
 
-        if self.path == "/api/run":
+        if self.path == "/api/settings/backup":
+            result = import_settings(body)
+        elif self.path == "/api/run":
             result = start_run(body.get("only") or None)
         elif self.path == "/api/stop":
             result = stop_run()
