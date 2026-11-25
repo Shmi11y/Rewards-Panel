@@ -45,6 +45,7 @@ MAX_TIMES = 4
 
 def find_pythonw() -> str | None:
     cands = [
+        ROOT / "runtime" / "python" / "pythonw.exe",
         Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Python" / "Python313" / "pythonw.exe",
         Path(sys.executable).with_name("pythonw.exe"),
     ]

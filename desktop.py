@@ -358,6 +358,24 @@ class Api:
 
 # ---------------------------------------------------------------- 启动
 
+def bundled_webview_runtime() -> Path | None:
+    runtime = ROOT / "runtime" / "webview2"
+    if not (runtime / "msedgewebview2.exe").is_file():
+        return None
+    if sys.getwindowsversion().build < 22000:
+        # Fixed WebView2 on Windows 10 gives its renderer an AppContainer token.
+        icacls = Path(os.environ["SystemRoot"]) / "System32" / "icacls.exe"
+        subprocess.run(
+            [str(icacls), str(runtime), "/grant",
+             "*S-1-15-2-2:(OI)(CI)(RX)", "*S-1-15-2-1:(OI)(CI)(RX)"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+            check=True,
+        )
+    return runtime
+
+
 def fallback_chromium() -> int:
     found = sorted((ROOT / "browser").glob("chromium-*/chrome-win64/chrome.exe"))
     if not found:
@@ -369,8 +387,11 @@ def fallback_chromium() -> int:
             f"--window-size={w},{h}", "--no-first-run", "--no-default-browser-check"]
     if x >= 0 and y >= 0:
         args.append(f"--window-position={x},{y}")
-    subprocess.Popen(args)
-    return 0
+    try:
+        return subprocess.call(args)
+    finally:
+        if task_running():
+            api("/api/stop", "POST", {})
 
 
 def main() -> int:
@@ -382,8 +403,11 @@ def main() -> int:
 
     try:
         import webview  # noqa: PLC0415
+        runtime = bundled_webview_runtime()
+        if runtime is not None:
+            webview.settings["WEBVIEW2_RUNTIME_PATH"] = str(runtime)
     except Exception as exc:  # noqa: BLE001
-        print(f"pywebview 不可用（{exc}），改用内置浏览器窗口")
+        _log(f"WebView 初始化失败（{exc}），改用内置浏览器窗口")
         return fallback_chromium()
 
     try:
@@ -449,7 +473,11 @@ def main() -> int:
     except Exception as exc:  # noqa: BLE001
         _log(f"关闭事件注册失败: {exc}")
 
-    webview.start()
+    try:
+        webview.start()
+    except Exception as exc:  # noqa: BLE001
+        _log(f"桌面窗口启动失败（{exc}），改用内置浏览器窗口")
+        return fallback_chromium()
     return 0
 
 

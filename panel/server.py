@@ -931,7 +931,21 @@ class Handler(BaseHTTPRequestHandler):
                    "application/json; charset=utf-8")
 
 
+def seed_config() -> None:
+    example = HOME / "config.example.json"
+    if CONFIG_FILE.exists() or not example.is_file():
+        return
+    defaults = example.read_bytes()
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    try:
+        with CONFIG_FILE.open("xb") as target:
+            target.write(defaults)
+    except FileExistsError:
+        pass
+
+
 def main() -> None:
+    seed_config()
     try:
         prune_old_logs()
     except Exception:

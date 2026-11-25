@@ -42,7 +42,7 @@ echo ============================================================
 echo.
 
 cd /d "%ROOT%\app"
-node.exe dist\index.js
+"%ROOT%\app\node.exe" dist\index.js
 set "RC=%ERRORLEVEL%"
 
 echo.

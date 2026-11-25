@@ -1,8 +1,6 @@
 # Rewards 面板
 
-给无人值守的微软奖励脚本配一个本地图形界面：看余额、改配置、翻日志、排定时，不用再手改配置文件。
-
-界面是本地网页（`http://127.0.0.1:8765`），外壳用 pywebview 套成无边框桌面窗口。所有数据都在本机，不发往任何服务器。
+Rewards 面板是基于开源项目 Microsoft-Rewards-Script 的 Windows 桌面 GUI，用于管理 Microsoft Rewards 账号、查看积分和日志、配置任务及安排定时运行。界面通过 pywebview 显示为本地桌面窗口。[Microsoft-Rewards-Script](https://github.com/TheNetsky/Microsoft-Rewards-Script)
 
 | 浅色 | 深色 |
 |---|---|
@@ -21,67 +19,55 @@
 - **安全**：账号密码用 Windows DPAPI 加密存盘；本地接口需令牌；密码永不出现在接口响应里
 - **体验**：深浅色主题、窗口尺寸记忆、单实例、无边框窗口、托盘残留的“Python”问题已修
 
-## 与上游的关系
+## Windows 便携版
 
-**本项目不含爬虫/自动化逻辑本身。** 它是上游开源项目的一个前端外壳：
+使用 Windows 10/11 x64。将 `RewardsPanel-windows-x64-portable.zip` 完整解压到本机可写入的目录，再双击 `Rewards.bat`。便携包内含 Python、Node.js 和 WebView2。首次启动需要联网，程序会自动下载 Chromium 到 `browser/`，后续启动直接使用这份内核。进入面板后，打开「账号 → 添加账号」完成首次登录。
 
-| 角色 | 项目 |
-|---|---|
-| 自动化核心 | [huaisha1224/Microsoft-Rewards](https://github.com/huaisha1224/Microsoft-Rewards)（MIT，`Copyright (c) 2023 Sam.Huang`） |
-| 本项目 | `panel/` `desktop.py` `scheduler.py` `assets/` —— Python + HTML/JS 独立实现 |
+## 从源码运行
 
-所以你需要**自己把上游放进 `app/` 目录**，本仓库不附带它的构建产物。
-界面文案已全部重写；信息架构（任务分类、档位划分）参考了上游，详见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
+### 环境要求
 
-## 快速开始
+- Windows 10/11 x64
+- Python 3.10+，用于运行桌面面板。[Python 下载](https://www.python.org/downloads/)
+- Node.js 24+，用于构建和运行上游脚本。[Node.js 下载](https://nodejs.org/) · [上游版本要求](https://github.com/huaisha1224/Microsoft-Rewards/blob/main/package.json)
+- Git 和 Edge WebView2 Runtime。缺少 WebView2 时可单独安装。[WebView2 下载](https://developer.microsoft.com/microsoft-edge/webview2/#download-section)
 
-### 前置
+### 1. 安装面板依赖
 
-- Windows 10/11
-- [Python 3.10+](https://www.python.org/downloads/)（勾选 Add to PATH）
-- [Node.js 20+](https://nodejs.org/)（构建上游用）
-
-### 1. 装依赖
+在 Rewards Panel 仓库根目录打开 PowerShell。
 
 ```powershell
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 ```
 
-> `pywebview` 依赖 Edge WebView2 运行时，Win10/11 一般自带；没有的话到微软官网装 “WebView2 Runtime”。
+### 2. 准备上游脚本和 Chromium
 
-### 2. 准备运行时核心
-
-把上游放到 `app/`：
+上游源码、构建产物和 Chromium 需要在本机准备。以下命令适用于首次安装，从 Rewards Panel 仓库根目录执行。
 
 ```powershell
-git clone https://github.com/huaisha1224/Microsoft-Rewards app
-cd app
-npm install
-npm run build
-cd ..
+git clone https://github.com/huaisha1224/Microsoft-Rewards.git app
+$rewardsBrowserPath = Join-Path (Get-Location).Path 'browser'
+Copy-Item -LiteralPath (Get-Command node.exe -CommandType Application).Source -Destination .\app\node.exe
+
+Push-Location .\app
+npm.cmd install
+npm.cmd run build
+$env:PLAYWRIGHT_BROWSERS_PATH = $rewardsBrowserPath
+npm.cmd run install:browser
+Pop-Location
 ```
 
-构建完应存在 `app/dist/index.js` 和 `app/node.exe`（没有 `node.exe` 就用系统 Node，或者在 `app/` 下放一份便携版 `node.exe`）。
+面板和定时调度从 `app/node.exe` 运行 `app/dist/index.js`，登录窗口使用安装到 `browser/` 的 Chromium。
 
-### 3. 配置账号
+### 3. 启动面板并添加账号
 
-首次启动会自动生成 `data/` 目录，点开界面「账号 → 添加账号」填邮箱密码即可。
-也可以手写 `data/.env`：
-
-```ini
-ACCOUNT_1_EMAIL=you@example.com
-ACCOUNT_1_PASSWORD=your-password
-ACCOUNT_1_TOTP_SECRET=
-ACCOUNT_1_PROXY=
-```
-
-### 4. 启动
+在仓库根目录运行以下命令，或双击 `Rewards.bat`。
 
 ```powershell
 python desktop.py
 ```
 
-或者双击 `Rewards.bat`。
+打开「账号 → 添加账号」，输入微软账号邮箱，在弹出的窗口完成登录。登录会话保存到本机 `data/sessions/`，账号配置由面板写入 `data/`。回到面板后，可在顶栏启动任务，或到「设置 → 自动运行」配置定时。
 
 ## 目录结构
 
@@ -89,7 +75,7 @@ python desktop.py
 RewardsApp/
 ├─ desktop.py            无边框窗口外壳：单实例、几何记忆、图标、快捷方式
 ├─ scheduler.py          定时守护（独立进程，无窗口常驻）
-├─ Rewards.bat           带控制台的启动器
+├─ Rewards.bat           Windows 启动器
 ├─ Run-Task.bat          静默跑一次任务（开机自启脚本会调它）
 ├─ panel/
 │  ├─ server.py          本地 HTTP 接口 + 静态服务（127.0.0.1:8765）
@@ -99,7 +85,7 @@ RewardsApp/
 ├─ assets/               图标（png/ico）与生成脚本
 ├─ docs/                 README 截图
 ├─ app/                  ← 上游项目，自行放置，不入库
-├─ browser/              ← Playwright Chromium，首次运行自动下载，不入库
+├─ browser/              ← Patchright Chromium，便携版首次启动自动下载，不入库
 └─ data/                 ← 运行时数据，不入库
    ├─ .env               账号配置（工具读取）
    ├─ accounts.json      账号表（密码字段为 DPAPI 密文）
@@ -111,22 +97,9 @@ RewardsApp/
 
 ## 工作原理
 
-```
-Rewards.bat / desktop.py
-   ├─ 起后端线程：panel/server.py  → 127.0.0.1:8765
-   ├─ 起窗口：pywebview（无边框 + WebView2）
-   └─ 页面每 2.5s GET /api/status
-                 │
-                 ├─ 任务在跑？→ 读 data/task.pid + 日志新鲜度判断
-                 └─ 解析 app/logs/YYYY-MM-DD.log → 余额、动作、错误
+`desktop.py` 启动本地服务（默认 `127.0.0.1:8765`），再打开 pywebview 桌面窗口。页面定期读取运行状态，面板解析 `app/logs/` 下的任务日志，展示余额、动作与错误。
 
-点「开始任务」
-   └─ gevent/无 → subprocess(node dist/index.js)
-        env 注入：账号、代理、任务开关、节奏参数
-        输出重定向 → 日志文件，面板只读不写
-```
-
-任务本身由上游脚本在独立进程里跑，面板不介入浏览器自动化。**关掉面板不会中断任务**，除非你在运行中手动关窗口（会先停任务）。
+点击「开始任务」时，面板用独立 Node.js 进程运行 `app/dist/index.js`，并提供账号配置和本地数据目录。关闭桌面窗口时会尝试停止正在运行的任务。每日定时由后台守护进程触发，可在桌面窗口关闭时运行。
 
 ## 定时与开机自启
 
@@ -149,7 +122,7 @@ Rewards.bat / desktop.py
 | 密码存储 | `data/accounts.json` 中 `password` / `totp` / `proxy_pass` 用 DPAPI 加密（`enc:` 前缀），绑定当前 Windows 用户，换机器解不开 |
 | 接口鉴权 | 首次启动生成 `data/.api-token`，无令牌访问 `/api/*` 返回 403；页面用 `?k=` 首次进入后落 cookie |
 | 监听范围 | 只绑定 `127.0.0.1`，不接受外部连接 |
-| 响应脱敏 | 账号接口只返回 `hasPassword` 等布尔值，明文密码不出进程 |
+| 响应脱敏 | 账号接口用 `hasPassword` 等字段表示凭据是否存在，响应中不包含密码正文 |
 | `.env` | 由 `accounts.json` 生成，供上游脚本读取，因此是明文——只放在本机 `data/` 下 |
 
 ## 本地接口
@@ -174,7 +147,7 @@ Rewards.bat / desktop.py
 
 **窗口怎么拖动**：按住**顶栏空白处**拖（标题那一行）。页面其它区域不响应拖动，避免翻日志、选文字时把窗口带跑；双击顶栏最大化/还原。
 
-**启动弹黑框**：用 `python desktop.py` 而不是 `pythonw`，或直接用 `Rewards.bat`。
+**窗口启动失败**：在仓库根目录执行 `python desktop.py` 查看终端报错，并确认 Python 依赖和 WebView2 已安装。
 
 **任务栏右键显示 “Python”**：需要 `pywin32`。程序会自动在开始菜单建带 AUMID 的快捷方式，建好后取消固定再重新固定即可。
 
@@ -197,9 +170,9 @@ curl "http://127.0.0.1:8765/api/status?k=$k"
 
 ## 许可
 
-本项目代码：MIT（见 [LICENSE](LICENSE)）。
+Rewards 面板采用 MIT 许可。[本项目许可证](LICENSE)
 
-上游 `app/`：MIT / GPL-3.0-later 声明不一致，详见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
+运行时依赖的许可声明见第三方声明。本项目随附上游 MIT 许可文本。[许可原文副本](docs/upstream-MIT-LICENSE.txt) · [第三方声明](THIRD-PARTY-NOTICES.md)
 
 ## 免责
 
