@@ -26,7 +26,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-DATA = Path(os.environ.get("REWARDS_DATA_DIR") or ROOT / "data")
+DATA = Path(os.environ.get("REWARDS_DATA_DIR") or ROOT / "data").resolve()
 SCHED = DATA / "schedule.json"
 PIDFILE = DATA / "scheduler.pid"
 SCHEDULER = ROOT / "scheduler.py"
@@ -140,6 +140,7 @@ def apply_startup(mode: str) -> dict:
     if mode == "boot":
         _write_bat(BOOT_BAT, [
             "rem auto start on logon: wait then run task silently",
+            f'set "REWARDS_DATA_DIR={DATA}"',
             "ping -n 61 127.0.0.1 >nul",
             f'cd /d "{ROOT}"',
             f'start "" /min cmd /c ""{TASK}" /silent"',
@@ -149,6 +150,7 @@ def apply_startup(mode: str) -> dict:
         if pyw:
             _write_bat(DAEMON_BAT, [
                 "rem keep scheduler daemon alive",
+                f'set "REWARDS_DATA_DIR={DATA}"',
                 f'start "" /min "{pyw}" "{SCHEDULER}"',
             ])
     return startup_status()

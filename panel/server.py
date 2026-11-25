@@ -24,13 +24,11 @@ from datetime import datetime
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 
-import accounts as acct
-import schedule as sched_mod
-
 ROOT = Path(os.environ.get("REWARDS_APP_ROOT") or Path(__file__).resolve().parent.parent)
 HOME = ROOT / "app"
 NODE = HOME / "node.exe"
 ENTRY = HOME / "dist" / "index.js"
+TASK_DATA = ROOT / "task-data.cjs"
 LOG_DIR = HOME / "logs"
 BROWSER_ROOT = ROOT / "browser"
 
@@ -38,7 +36,7 @@ BROWSER_ROOT = ROOT / "browser"
 def _data_dir() -> Path:
     env = os.environ.get("REWARDS_DATA_DIR")
     if env:
-        return Path(env)
+        return Path(env).resolve()
     local = ROOT / "data"
     if local.exists():
         return local
@@ -46,6 +44,11 @@ def _data_dir() -> Path:
 
 
 DATA_DIR = _data_dir()
+os.environ["REWARDS_DATA_DIR"] = str(DATA_DIR)
+
+import accounts as acct
+import schedule as sched_mod
+
 SESSION_DB = DATA_DIR / "sessions" / "sessions.db"
 CONFIG_FILE = DATA_DIR / "config.json"
 PREFS_FILE = DATA_DIR / "prefs.json"
@@ -411,7 +414,7 @@ def _app_version() -> str:
         return ""
 
 _proc: subprocess.Popen | None = None
-_lock = threading.Lock()
+_lock = threading.RLock()
 _cache = {"key": None, "data": None}
 _ui_state: dict = {}
 _local_close = None   # 由桌面外壳注入，用于关闭窗口
@@ -645,8 +648,9 @@ def start_run(only: str | None = None) -> dict:
         # 定时守护可能已经拉起任务，避免同时跑两份抢同一个账号
         if run_state() is not None:
             return {"ok": False, "msg": "已有任务在运行（可能由定时任务启动）"}
-        if not NODE.exists() or not ENTRY.exists():
-            return {"ok": False, "msg": f"找不到 {NODE} 或 {ENTRY}"}
+        missing = next((path for path in (NODE, TASK_DATA, ENTRY) if not path.is_file()), None)
+        if missing is not None:
+            return {"ok": False, "msg": f"找不到 {missing}"}
         _cache["key"] = None
         env = dict(os.environ)
         env["PLAYWRIGHT_BROWSERS_PATH"] = str(BROWSER_ROOT)
@@ -662,7 +666,7 @@ def start_run(only: str | None = None) -> dict:
             except Exception as exc:  # noqa: BLE001
                 return {"ok": False, "msg": f"生成 .env 失败: {exc}"}
         _proc = subprocess.Popen(
-            [str(NODE), str(ENTRY)],
+            [str(NODE), "--require", str(TASK_DATA), str(ENTRY)],
             cwd=str(HOME),
             env=env,
             stdout=subprocess.DEVNULL,

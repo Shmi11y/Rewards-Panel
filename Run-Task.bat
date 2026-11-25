@@ -3,7 +3,7 @@ chcp 65001 >nul
 setlocal
 
 rem ================================================================
-rem  Rewards - headless task runner (for Task Scheduler / automation)
+rem  Rewards - task runner for Windows startup and Task Scheduler
 rem  usage: Run-Task.bat /silent
 rem ================================================================
 
@@ -11,20 +11,25 @@ set "ROOT=%~dp0"
 if "%ROOT:~-1%"=="\" set "ROOT=%ROOT:~0,-1%"
 
 set "PLAYWRIGHT_BROWSERS_PATH=%ROOT%\browser"
-set "REWARDS_DATA_DIR=%ROOT%\data"
+if not defined REWARDS_DATA_DIR set "REWARDS_DATA_DIR=%ROOT%\data"
 set "REWARDS_APP_ROOT=%ROOT%"
+set "RC=1"
 
 if not exist "%ROOT%\app\dist\index.js" (
     echo [ERROR] missing app\dist\index.js
     goto :hold
 )
-if not exist "%ROOT%\data\.env" (
+if not exist "%ROOT%\task-data.cjs" (
+    echo [ERROR] missing task-data.cjs
+    goto :hold
+)
+if not exist "%REWARDS_DATA_DIR%\.env" (
     echo [ERROR] missing data\.env
     goto :hold
 )
 
 rem findstr needs CRLF line endings
-findstr /r /c:"^ACCOUNT_1_EMAIL=." "%ROOT%\data\.env" >nul 2>&1
+findstr /r /c:"^ACCOUNT_1_EMAIL=." "%REWARDS_DATA_DIR%\.env" >nul 2>&1
 if errorlevel 1 (
     echo [ERROR] ACCOUNT_1_EMAIL is empty in data\.env
     goto :hold
@@ -42,7 +47,7 @@ echo ============================================================
 echo.
 
 cd /d "%ROOT%\app"
-"%ROOT%\app\node.exe" dist\index.js
+"%ROOT%\app\node.exe" --require "%ROOT%\task-data.cjs" "%ROOT%\app\dist\index.js"
 set "RC=%ERRORLEVEL%"
 
 echo.

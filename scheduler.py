@@ -24,7 +24,7 @@ from datetime import datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-DATA = Path(os.environ.get("REWARDS_DATA_DIR") or ROOT / "data")
+DATA = Path(os.environ.get("REWARDS_DATA_DIR") or ROOT / "data").resolve()
 SCHED = DATA / "schedule.json"
 PIDFILE = DATA / "scheduler.pid"
 TASK_PID = DATA / "task.pid"
@@ -106,9 +106,11 @@ def trigger(reason: str) -> int:
     """返回新进程 pid，失败返回 0"""
     node = ROOT / "app" / "node.exe"
     entry = ROOT / "app" / "dist" / "index.js"
+    task_data = ROOT / "task-data.cjs"
     envfile = DATA / ".env"
-    if not node.exists() or not entry.exists():
-        log("跳过：缺少 node.exe 或 dist/index.js")
+    missing = next((path for path in (node, task_data, entry) if not path.is_file()), None)
+    if missing is not None:
+        log(f"跳过：缺少 {missing}")
         return 0
     if not envfile.exists() or "ACCOUNT_1_EMAIL=" not in envfile.read_text(encoding="utf-8", errors="ignore"):
         log("跳过：data\\.env 里没有账号")
@@ -123,12 +125,14 @@ def trigger(reason: str) -> int:
     env["PLAYWRIGHT_BROWSERS_PATH"] = str(ROOT / "browser")
     env["NODE_NO_WARNINGS"] = "1"
     (ROOT / "logs").mkdir(exist_ok=True)
-    out = open(ROOT / "logs" / f"task-{datetime.now():%Y-%m-%d}.out", "ab")
     flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
     try:
-        proc = subprocess.Popen([str(node), "dist/index.js"], cwd=str(ROOT / "app"), env=env,
-                                stdout=out, stderr=subprocess.STDOUT,
-                                creationflags=flags, close_fds=True)
+        with (ROOT / "logs" / f"task-{datetime.now():%Y-%m-%d}.out").open("ab") as out:
+            proc = subprocess.Popen(
+                [str(node), "--require", str(task_data), str(entry)],
+                cwd=str(ROOT / "app"), env=env, stdout=out, stderr=subprocess.STDOUT,
+                creationflags=flags, close_fds=True,
+            )
     except Exception as exc:  # noqa: BLE001
         log(f"启动失败: {exc}")
         return 0
