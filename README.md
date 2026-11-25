@@ -4,11 +4,13 @@ Rewards 面板是基于开源项目 Microsoft-Rewards-Script 的 Windows 桌面 
 
 ## 下载 Windows x64 轻量便携版
 
-**[下载 Rewards Panel 轻量便携包（74.7 MiB）](https://github.com/Shmi11y/rewards-panel/releases/latest/download/RewardsPanel-windows-x64-lite.zip)**
+**[下载 Rewards Panel v0.1.3 轻量便携包（74.7 MiB）](https://github.com/Shmi11y/rewards-panel/releases/download/v0.1.3/RewardsPanel-windows-x64-lite.zip)**
 
 1. 将 ZIP 完整解压到本机可写入的目录，打开 `RewardsPanel` 文件夹。
 2. 双击带项目图标的 **`Rewards.exe`**。
-3. **首次启动请保持联网。** 程序会自动配置运行环境并下载 Chromium。已有 WebView2 会直接复用，缺少时会自动下载到软件目录。
+3. **首次启动请保持联网。** 程序会自动配置运行环境并下载 Chromium。已有 WebView2 会直接复用，缺少时会自动下载到软件目录。窗口会显示正在下载的组件和百分比。
+
+下载失败时，点击「重试」重新尝试，或点击「打开日志」查看解压目录中的 `logs/launcher.log`。
 
 Python 和 Node.js 已随包提供。面板打开后，在「账号 → 添加账号」完成首次登录。
 
