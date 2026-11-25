@@ -18,6 +18,7 @@ import secrets
 import re
 import sqlite3
 import subprocess
+import sys
 import threading
 import time
 from datetime import datetime
@@ -28,7 +29,6 @@ ROOT = Path(os.environ.get("REWARDS_APP_ROOT") or Path(__file__).resolve().paren
 HOME = ROOT / "app"
 NODE = HOME / "node.exe"
 ENTRY = HOME / "dist" / "index.js"
-TASK_DATA = ROOT / "task-data.cjs"
 LOG_DIR = HOME / "logs"
 BROWSER_ROOT = ROOT / "browser"
 
@@ -46,8 +46,12 @@ def _data_dir() -> Path:
 DATA_DIR = _data_dir()
 os.environ["REWARDS_DATA_DIR"] = str(DATA_DIR)
 
+SOURCE_ROOT = str(Path(__file__).resolve().parent.parent)
+if SOURCE_ROOT not in sys.path:
+    sys.path.insert(0, SOURCE_ROOT)
 import accounts as acct
 import schedule as sched_mod
+import run_history
 
 SESSION_DB = DATA_DIR / "sessions" / "sessions.db"
 CONFIG_FILE = DATA_DIR / "config.json"
@@ -617,6 +621,10 @@ def _slim_log() -> dict:
 
 def build_status() -> dict:
     state = run_state()
+    try:
+        latest = run_history.read(DATA_DIR, latest=True)
+    except sqlite3.Error:
+        latest = []
     return {
         "running": state is not None,
         "runningBy": state,
@@ -630,6 +638,7 @@ def build_status() -> dict:
         "schedule": sched_mod.status(),
         "ui": dict(_ui_state),
         "cacheBytes": cache_size(),
+        "latestRun": latest[0] if latest else None,
         "app": {
             "home": str(HOME),
             "root": str(ROOT),
@@ -648,15 +657,9 @@ def start_run(only: str | None = None) -> dict:
         # 定时守护可能已经拉起任务，避免同时跑两份抢同一个账号
         if run_state() is not None:
             return {"ok": False, "msg": "已有任务在运行（可能由定时任务启动）"}
-        missing = next((path for path in (NODE, TASK_DATA, ENTRY) if not path.is_file()), None)
-        if missing is not None:
-            return {"ok": False, "msg": f"找不到 {missing}"}
         _cache["key"] = None
         env = dict(os.environ)
-        env["PLAYWRIGHT_BROWSERS_PATH"] = str(BROWSER_ROOT)
         env["REWARDS_DATA_DIR"] = str(DATA_DIR)
-        env["REWARDS_APP_ROOT"] = str(ROOT)
-        env["NODE_NO_WARNINGS"] = "1"
         if only:
             # 只跑一个账号：靠环境变量覆盖，不动 .env
             env.update(acct.child_env_for(only))
@@ -665,61 +668,39 @@ def start_run(only: str | None = None) -> dict:
                 acct.write_env()
             except Exception as exc:  # noqa: BLE001
                 return {"ok": False, "msg": f"生成 .env 失败: {exc}"}
-        _proc = subprocess.Popen(
-            [str(NODE), "--require", str(TASK_DATA), str(ENTRY)],
-            cwd=str(HOME),
-            env=env,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-        )
         try:
-            (DATA_DIR / "task.pid").write_text(str(_proc.pid), encoding="utf-8")
-        except Exception:
-            pass
+            _proc = run_history.launch("manual", env=env)
+        except OSError:
+            return {"ok": False, "msg": "无法启动任务进程"}
+        if _proc is None:
+            return {"ok": False, "msg": "已有任务在运行（可能由定时任务启动）"}
         return {"ok": True, "pid": _proc.pid}
 
 
 def stop_run() -> dict:
-    global _proc
     with _lock:
-        # 定时守护启动的任务不在 _proc 里，兜底按 task.pid 杀
-        if _proc is None or _proc.poll() is not None:
-            ext = task_pid()
-            if ext and _pid_alive(ext):
-                try:
-                    subprocess.run(["taskkill", "/F", "/T", "/PID", str(ext)],
-                                   capture_output=True, timeout=8)
-                except Exception:
-                    return {"ok": False, "msg": "结束进程失败"}
-                try:
-                    (DATA_DIR / "task.pid").unlink()
-                except Exception:
-                    pass
+        tracked = run_history.request_stop(DATA_DIR)
+        if tracked is not None:
+            if tracked["ok"]:
                 mark_stopped()
-                return {"ok": True, "stopped": ext}
+            return tracked
+        if proc_alive():
+            return {"ok": False, "msg": "任务正在准备或收尾，请稍后再试"}
+        # Also stop a live engine started by an older scheduler.
+        ext = task_pid()
+        if not ext or not _pid_alive(ext):
             return {"ok": False, "msg": "当前没有在跑"}
-        pid = _proc.pid
-        # 先不带 /F，让 node 有机会走完当前写入；10 秒不退再强杀
         try:
-            subprocess.run(["taskkill", "/PID", str(pid), "/T"],
-                           capture_output=True, timeout=6,
-                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-        except Exception:
-            pass
-        for _ in range(20):
-            if _proc.poll() is not None:
-                break
-            time.sleep(0.5)
-        else:
-            _proc.kill()
-        try:
-            subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)],
-                           capture_output=True, timeout=8)
-        except Exception:
-            pass
+            stopped = subprocess.run(["taskkill", "/F", "/T", "/PID", str(ext)],
+                                     capture_output=True, timeout=8,
+                                     creationflags=run_history.NO_WINDOW)
+            if stopped.returncode and _pid_alive(ext):
+                return {"ok": False, "msg": "结束进程失败"}
+            (DATA_DIR / "task.pid").unlink(missing_ok=True)
+        except (OSError, subprocess.SubprocessError):
+            return {"ok": False, "msg": "结束进程失败"}
         mark_stopped()
-        return {"ok": True, "stopped": pid}
+        return {"ok": True, "stopped": ext}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -781,6 +762,10 @@ class Handler(BaseHTTPRequestHandler):
     def _route_get(self) -> None:
         if self.path.startswith("/api/status"):
             self._send(200, json.dumps(build_status(), ensure_ascii=False).encode("utf-8"),
+                       "application/json; charset=utf-8")
+            return
+        if self.path == "/api/runs":
+            self._send(200, json.dumps({"runs": run_history.read(DATA_DIR)}, ensure_ascii=False).encode("utf-8"),
                        "application/json; charset=utf-8")
             return
         if self.path.startswith("/api/accounts"):

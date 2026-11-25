@@ -12,7 +12,10 @@ if (isMainThread) {
         process.chdir(dataDir);
         const config = loadConfig();
         config.sessionPath = path.resolve(dataDir, config.sessionPath);
-        loadAccounts();
+        const accounts = loadAccounts();
+        if (process.env.REWARDS_RUN_EVENTS) {
+            require('./run-events.cjs').observe(process.env.REWARDS_RUN_EVENTS, accounts);
+        }
     } finally {
         process.chdir(originalDir);
     }

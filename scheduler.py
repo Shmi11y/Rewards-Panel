@@ -14,16 +14,18 @@ Rewards 定时守护
 """
 from __future__ import annotations
 
-import ctypes
 import json
 import os
-import subprocess
 import sys
 import time
 from datetime import datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+import run_history
+
 DATA = Path(os.environ.get("REWARDS_DATA_DIR") or ROOT / "data").resolve()
 SCHED = DATA / "schedule.json"
 PIDFILE = DATA / "scheduler.pid"
@@ -43,16 +45,7 @@ def log(msg: str) -> None:
         pass
 
 
-def _pid_alive(pid: int) -> bool:
-    if not pid:
-        return False
-    handle = ctypes.windll.kernel32.OpenProcess(0x1000, False, pid)
-    if not handle:
-        return False
-    code = ctypes.c_ulong()
-    ok = ctypes.windll.kernel32.GetExitCodeProcess(handle, ctypes.byref(code))
-    ctypes.windll.kernel32.CloseHandle(handle)
-    return bool(ok) and code.value == 259
+_pid_alive = run_history.process_alive
 
 
 def read_schedule() -> dict:
@@ -102,41 +95,23 @@ def log_mtime() -> float:
         return 0.0
 
 
-def trigger(reason: str) -> int:
+def trigger(reason: str, *, source: str = "daily") -> int:
     """返回新进程 pid，失败返回 0"""
-    node = ROOT / "app" / "node.exe"
-    entry = ROOT / "app" / "dist" / "index.js"
-    task_data = ROOT / "task-data.cjs"
-    envfile = DATA / ".env"
-    missing = next((path for path in (node, task_data, entry) if not path.is_file()), None)
-    if missing is not None:
-        log(f"跳过：缺少 {missing}")
-        return 0
-    if not envfile.exists() or "ACCOUNT_1_EMAIL=" not in envfile.read_text(encoding="utf-8", errors="ignore"):
-        log("跳过：data\\.env 里没有账号")
-        return 0
     if task_running():
         log(f"跳过（已有任务在跑）: {reason}")
         return 0
 
-    env = dict(os.environ)
-    env["REWARDS_APP_ROOT"] = str(ROOT)
-    env["REWARDS_DATA_DIR"] = str(DATA)
-    env["PLAYWRIGHT_BROWSERS_PATH"] = str(ROOT / "browser")
-    env["NODE_NO_WARNINGS"] = "1"
+    env = dict(os.environ, REWARDS_DATA_DIR=str(DATA))
     (ROOT / "logs").mkdir(exist_ok=True)
-    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
     try:
         with (ROOT / "logs" / f"task-{datetime.now():%Y-%m-%d}.out").open("ab") as out:
-            proc = subprocess.Popen(
-                [str(node), "--require", str(task_data), str(entry)],
-                cwd=str(ROOT / "app"), env=env, stdout=out, stderr=subprocess.STDOUT,
-                creationflags=flags, close_fds=True,
-            )
+            proc = run_history.launch(source, env=env, output=out)
     except Exception as exc:  # noqa: BLE001
         log(f"启动失败: {exc}")
         return 0
-    TASK_PID.write_text(str(proc.pid), encoding="utf-8")
+    if proc is None:
+        log(f"跳过（已有任务在跑）: {reason}")
+        return 0
     log(f"已触发 pid={proc.pid} 原因={reason}")
     return proc.pid
 
@@ -160,7 +135,7 @@ def main() -> None:
 
                 # --- 开机模式 ---
                 if mode == "boot" and not boot_once_done and time.time() - booted_at > sched.get("bootDelay", 60):
-                    if trigger("开机自动运行"):
+                    if trigger("开机自动运行", source="boot"):
                         boot_once_done = True
 
                 # --- 每日多时间点 ---
@@ -178,13 +153,14 @@ def main() -> None:
                             continue
                         if (now.hour, now.minute) < (hh, mm):
                             continue
+                        previous_mtime = log_mtime()
                         pid = trigger(f"每天 {slot} 定时")
                         if pid:
                             done.append(slot)
                             sched.setdefault("done", {})[today] = done
                             write_schedule(sched)
                             pending = {"slot": slot, "at": time.time(),
-                                       "mtime": log_mtime(), "tries": 1, "left": retry_left}
+                                       "mtime": previous_mtime, "tries": 1, "left": retry_left}
                         break
 
                 # --- 重试判定 ---
@@ -197,9 +173,9 @@ def main() -> None:
                             pending["left"] -= 1
                             pending["tries"] += 1
                             log(f"重试 {pending['tries']} 次：{pending['slot']} 触发后无日志输出")
-                            pid = trigger(f"重试 {pending['slot']} 定时")
-                            pending["at"] = time.time()
                             pending["mtime"] = log_mtime()
+                            trigger(f"重试 {pending['slot']} 定时")
+                            pending["at"] = time.time()
                         else:
                             if not moved and not alive:
                                 log(f"放弃重试：{pending['slot']} 无输出且已无重试次数")

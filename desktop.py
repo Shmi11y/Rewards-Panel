@@ -26,6 +26,11 @@ import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
+# The portable Python's ._pth file excludes the script directory.
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+from windows_notifications import AUMID, register_shortcut
+
 os.environ["REWARDS_APP_ROOT"] = str(ROOT)
 os.environ.setdefault("REWARDS_DATA_DIR", str(ROOT / "data"))
 os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", str(ROOT / "browser"))
@@ -103,10 +108,6 @@ def task_running() -> bool:
     return bool(api("/api/status").get("running"))
 
 
-AUMID = "Rewards.Desktop.App"
-SHORTCUT = Path(os.environ.get("APPDATA", "")) / "Microsoft/Windows/Start Menu/Programs/Rewards.lnk"
-
-
 def ensure_shortcut() -> None:
     """在开始菜单建一个带 AUMID 的快捷方式
 
@@ -115,41 +116,8 @@ def ensure_shortcut() -> None:
     系统就能解析出应用名和图标。
     """
     try:
-        import pythoncom
-        from win32com.propsys import propsys, pscon
-        from win32com.shell import shell
-    except Exception as exc:  # noqa: BLE001
-        _log(f"未安装 pywin32，跳过快捷方式: {exc}")
-        return
-
-    try:
-        exe = Path(sys.executable)
-        arguments = f'"{ROOT / "desktop.py"}"'
-        launcher = ROOT / "Rewards.exe"
-        if launcher.is_file():
-            exe = launcher
-            arguments = ""
-        elif exe.name.lower() == "python.exe":
-            cand = exe.with_name("pythonw.exe")
-            if cand.exists():
-                exe = cand
-
-        link = pythoncom.CoCreateInstance(shell.CLSID_ShellLink, None,
-                                          pythoncom.CLSCTX_INPROC_SERVER,
-                                          shell.IID_IShellLink)
-        link.SetPath(str(exe))
-        link.SetArguments(arguments)
-        link.SetWorkingDirectory(str(ROOT))
-        link.SetIconLocation(str(ICO), 0)
-        link.SetDescription("Rewards")
-        link.QueryInterface(pythoncom.IID_IPersistFile).Save(str(SHORTCUT), 0)
-
-        store = propsys.SHGetPropertyStoreFromParsingName(str(SHORTCUT), None, 2)
-        store.SetValue(pscon.PKEY_AppUserModel_ID,
-                       propsys.PROPVARIANTType(AUMID, pythoncom.VT_LPWSTR))
-        store.Commit()
-        del store
-        _log(f"快捷方式与 AUMID 就绪: {SHORTCUT}")
+        shortcut = register_shortcut(ROOT, refresh=True)
+        _log(f"快捷方式与 AUMID 就绪: {shortcut}")
     except Exception as exc:  # noqa: BLE001
         _log(f"快捷方式处理失败: {exc}")
 

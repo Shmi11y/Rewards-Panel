@@ -143,7 +143,7 @@ def apply_startup(mode: str) -> dict:
             f'set "REWARDS_DATA_DIR={DATA}"',
             "ping -n 61 127.0.0.1 >nul",
             f'cd /d "{ROOT}"',
-            f'start "" /min cmd /c ""{TASK}" /silent"',
+            f'start "" /min cmd /c ""{TASK}" /silent /boot"',
         ])
     elif mode == "daily":
         pyw = find_pythonw()

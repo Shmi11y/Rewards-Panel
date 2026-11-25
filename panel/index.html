@@ -79,6 +79,24 @@
   .hero>div:first-child .k,.hero>div:first-child .sub{color:rgba(255,255,255,.8)}
   .hero>div:first-child .v{color:#fff;font-size:36px}
   @media(max-width:1100px){.hero{grid-template-columns:1fr 1fr}.hero>div{border-top:1px solid var(--line)}}
+  .recent-run{width:100%;display:flex;align-items:center;gap:16px;text-align:left;margin-bottom:18px;padding:14px 22px}
+  .recent-run .run-meta{flex:1;min-width:0;color:var(--muted);font-size:13px}
+  .run-status{font-size:12px;font-weight:600;color:var(--muted);white-space:nowrap}
+  .run-status.success{color:var(--green)}
+  .run-status.failed,.run-status.interrupted{color:var(--red)}
+  .run-status.partial,.run-status.needs_login{color:var(--amber)}
+  .run-status.running{color:var(--accent)}
+  .run-dialog{inset:0;margin:auto;width:min(710px,calc(100% - 44px));max-height:min(690px,85vh);
+    padding:20px 22px;background:var(--panel);color:var(--text);border:1px solid var(--line);
+    border-radius:16px;box-shadow:var(--sh);overflow:auto}
+  .run-dialog::backdrop{background:rgba(16,23,36,.5)}
+  .run-dialog-head{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px}
+  .run-dialog-head h2{margin:0;font-size:17px}
+  .run-entry{border-top:1px solid var(--line)}
+  .run-entry summary{padding:12px 0;cursor:pointer}
+  .run-entry summary .run-status{margin:0 8px}
+  .run-entry-body{padding:0 0 12px 16px;overflow-wrap:anywhere}
+  .run-entry-body td:last-child{white-space:nowrap}
   .qrow{display:flex;justify-content:space-between;font-size:13px;padding:9px 0;border-bottom:1px solid var(--line)}
   .qrow:last-child{border:none}
   .qrow b{font-variant-numeric:tabular-nums}
@@ -331,6 +349,12 @@
           <div><div class="k">计分动作</div><div class="v" id="sCount">—</div><div class="sub">今日已完成项目</div></div>
           <div><div class="k">登录会话</div><div class="v" id="sSession" style="font-size:18px;margin-top:8px">—</div><div class="sub" id="sSessionSub">—</div></div>
         </div>
+        <button class="card recent-run" id="recentRunButton" aria-haspopup="dialog" aria-controls="runHistoryDialog">
+          <strong>最近运行</strong>
+          <span class="run-meta" id="recentRunMeta">暂无运行记录</span>
+          <span class="run-status" id="recentRunStatus"></span>
+          <span class="k">查看记录 ›</span>
+        </button>
         <div class="card" style="margin-bottom:18px">
           <div class="ph" style="margin-bottom:6px"><h2 style="margin:0">积分曲线</h2><span class="sub" id="phaseText" style="margin:0"></span></div>
           <svg class="spark" id="spark" viewBox="0 0 600 120" preserveAspectRatio="none"></svg>
@@ -591,6 +615,13 @@
     </div>
   </div>
 </div>
+<dialog class="run-dialog" id="runHistoryDialog" aria-labelledby="runHistoryTitle">
+  <div class="run-dialog-head">
+    <h2 id="runHistoryTitle">最近 7 天的运行记录</h2>
+    <form method="dialog"><button class="ghost sm" autofocus>关闭</button></form>
+  </div>
+  <div id="runHistoryList"></div>
+</dialog>
 <div id="toast"></div>
 
 <script>
@@ -764,8 +795,80 @@ function spark(points){
   LAST_POINTS = points.length;
 }
 
+const RUN_SOURCES={manual:'手动',daily:'定时',boot:'开机'};
+const RUN_STATUSES={
+  running:'运行中',success:'成功',partial:'部分失败',failed:'失败',needs_login:'需重新登录',
+  skipped:'已跳过',stopped:'已停止',interrupted:'已中断',not_run:'未运行',unknown:'结果未知'
+};
+const RUN_TIME=new Intl.DateTimeFormat('zh-CN',{
+  month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false
+});
+let historyVersion=null;
+let historyRequest=0;
+
+function runSummary(run){
+  const parts=[RUN_TIME.format(new Date(run.startedAt*1000)), RUN_SOURCES[run.source]||'任务'];
+  if(run.finishedAt!=null){
+    const seconds=Math.max(0,Math.round(run.finishedAt-run.startedAt));
+    parts.push(seconds<60 ? seconds+' 秒' : Math.floor(seconds/60)+' 分 '+(seconds%60)+' 秒');
+  }
+  if(run.points!=null) parts.push(fmt(run.points)+' 积分');
+  const needsLogin=run.accounts.filter(account=>account.status==='needs_login').length;
+  if(needsLogin) parts.push(needsLogin+' 个账号需重新登录');
+  return parts.join(' · ');
+}
+
+function runBadge(status){
+  const key=Object.hasOwn(RUN_STATUSES,status) ? status : 'unknown';
+  return '<span class="run-status '+key+'">'+RUN_STATUSES[key]+'</span>';
+}
+
+function renderRecentRun(run){
+  $('recentRunMeta').textContent=run ? runSummary(run) : '暂无运行记录';
+  $('recentRunStatus').innerHTML=run ? runBadge(run.status) : '';
+  const version=run ? run.id+':'+run.status : 'empty';
+  if(historyVersion!==version){
+    historyVersion=version;
+    if($('runHistoryDialog').open) loadRunHistory();
+  }
+}
+
+async function loadRunHistory(){
+  const request=++historyRequest;
+  const list=$('runHistoryList');
+  try{
+    const response=await fetch('/api/runs',{cache:'no-store'});
+    if(!response.ok) throw new Error('运行记录读取失败');
+    const {runs}=await response.json();
+    if(request!==historyRequest || !$('runHistoryDialog').open) return;
+    const previous=[...list.querySelectorAll('details')];
+    const expanded=new Set(previous.filter(item=>item.open).map(item=>item.dataset.run));
+    list.innerHTML=runs.map((run,index)=>{
+      const id=Number(run.id);
+      const open=expanded.has(String(id)) || (!previous.length && index===0);
+      const results=run.accounts.map(account=>'<tr><td>'+esc(account.email)+'</td><td>'
+        +runBadge(account.status)+'</td><td>'+fmt(account.points)+'</td></tr>').join('');
+      const note=run.reason ? '<p class="sub">'+esc(run.reason)+'</p>' : '';
+      const accounts=results ? '<table><thead><tr><th>账号</th><th>结果</th><th>新增积分</th></tr></thead><tbody>'
+        +results+'</tbody></table>' : '<p class="sub">'+(run.status==='running'?'运行结束后显示账号结果':'暂无账号结果')+'</p>';
+      return '<details class="run-entry" data-run="'+id+'"'+(open?' open':'')+'><summary>'
+        +runBadge(run.status)+'<span class="k">'+esc(runSummary(run))+'</span></summary><div class="run-entry-body">'
+        +note+accounts+'</div></details>';
+    }).join('') || '<div class="empty">最近 7 天暂无运行记录</div>';
+  }catch(e){
+    if(request===historyRequest) list.innerHTML='<div class="empty">无法读取运行记录，请关闭后重试。</div>';
+  }
+}
+
+$('recentRunButton').onclick=()=>{
+  $('runHistoryList').innerHTML='<div class="empty">正在读取运行记录…</div>';
+  $('runHistoryDialog').showModal();
+  loadRunHistory();
+};
+
 function renderHome(d){
   const log=d.log, acc=d.accounts;
+  renderRecentRun(d.latestRun);
   countUp($('sBalance'), log.balance, '');
   $('sBalanceSub').textContent = log.startBalance!=null ? '今日起点 '+fmt(log.startBalance) : '尚未开始';
   if(log.gained) countUp($('sGained'), log.gained, '+'); else { $('sGained').textContent='—'; $('sGained').dataset.v='0'; }

@@ -4,7 +4,7 @@ Rewards 面板是基于开源项目 Microsoft-Rewards-Script 的 Windows 桌面 
 
 ## 下载 Windows x64 轻量便携版
 
-**[下载 Rewards Panel v0.1.3 轻量便携包（74.7 MiB）](https://github.com/Shmi11y/rewards-panel/releases/download/v0.1.3/RewardsPanel-windows-x64-lite.zip)**
+**[下载 Rewards Panel v0.1.4 轻量便携包（74.7 MiB）](https://github.com/Shmi11y/rewards-panel/releases/download/v0.1.4/RewardsPanel-windows-x64-lite.zip)**
 
 1. 将 ZIP 完整解压到本机可写入的目录，打开 `RewardsPanel` 文件夹。
 2. 双击带项目图标的 **`Rewards.exe`**。
@@ -23,6 +23,8 @@ Python 和 Node.js 已随包提供。面板打开后，在「账号 → 添加�
 ## 特性
 
 - **总览**：余额、今日新增、动作数、积分曲线、最近动作、今日配额，2.5 秒自动刷新
+- **运行记录**：首页显示最近一次运行，点开查看近 7 天的手动、定时和开机任务及各账号的结果
+- **Windows 异常提醒**：任务失败或账号需要重新登录时发出通知
 - **账号管理**：多账号增删改、切换当前、单独重登、密钥脱敏显示、批量启用/停用
 - **明细**：按活动名搜索、只看有积分的、一键导出 CSV
 - **日志**：按级别（错误/警告/成功）和账号过滤、关键字搜索、导出 txt
