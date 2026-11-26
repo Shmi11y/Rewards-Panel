@@ -41,10 +41,6 @@ ENV_FILE = DATA_DIR / ".env"
 ENV_BAK = DATA_DIR / ".env.bak"
 SESSION_DB = DATA_DIR / "sessions" / "sessions.db"
 
-FIELDS = ["EMAIL", "PASSWORD", "TOTP_SECRET", "RECOVERY_EMAIL", "GEO_LOCALE", "LANG_CODE",
-          "PROXY_HTTP", "PROXY_URL", "PROXY_PORT", "PROXY_USERNAME", "PROXY_PASSWORD",
-          "SAVE_FINGERPRINT_MOBILE", "SAVE_FINGERPRINT_DESKTOP"]
-
 SECRET_KEYS = {"password", "totp", "proxy_pass"}
 
 
@@ -349,32 +345,22 @@ def write_env() -> dict:
     return {"accounts": len(rows), "active": data.get("active")}
 
 
-def child_env_for(email: str | None = None) -> dict:
-    """只跑一个账号：其余 slot 的 EMAIL 置空，选中账号重映射到 ACCOUNT_1_*"""
-    data = load()
-    rows = [a for a in data["accounts"] if a.get("enabled", True)]
-    active = (data.get("active") or "").lower()
-    rows.sort(key=lambda a: (a["email"].lower() != active, a["email"]))
-    env: dict[str, str] = {}
-    for i in range(1, len(rows) + 1):
-        env[f"ACCOUNT_{i}_EMAIL"] = ""
-    target = None
-    for acc in rows:
-        if email and acc["email"].lower() == email.strip().lower():
-            target = acc
-            break
-    if target is None and rows:
-        target = rows[0]
-    if target:
-        for key, value in zip(FIELDS, [target.get("email"), target.get("password"),
-                                       target.get("totp"), target.get("recovery"),
-                                       target.get("geo") or "auto", target.get("lang") or "zh",
-                                       _bool(target.get("proxy_http")), target.get("proxy_url", ""),
-                                       target.get("proxy_port", ""), target.get("proxy_user", ""),
-                                       target.get("proxy_pass", ""),
-                                       _bool(target.get("fp_mobile")), _bool(target.get("fp_desktop"))]):
-            env[f"ACCOUNT_1_{key}"] = str(value or "")
-    return env
+def child_env_for(email: str) -> dict | None:
+    """选定账号映射到 ACCOUNT_1_*，并屏蔽环境和 .env 中其余账号。"""
+    with _lock:
+        target = _find(load(), email)
+        if target is None or not target.get("enabled", True):
+            return None
+        env = {key: "" for key in os.environ if re.fullmatch(r"ACCOUNT_[1-9][0-9]*_EMAIL", key, re.IGNORECASE)}
+        for path in (ENV_FILE, ROOT / "app/.env", ROOT / "app/dist/.env", ROOT / "app/src/.env"):
+            if path.is_file():
+                for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+                    key = line.partition("=")[0].strip()
+                    if re.fullmatch(r"ACCOUNT_[1-9][0-9]*_EMAIL", key, re.IGNORECASE):
+                        env[key] = ""
+                break
+        env.update(line.split("=", 1) for line in _slot_lines(1, target))
+        return env
 
 
 # ---------------------------------------------------------------- 会话与积分
@@ -454,32 +440,42 @@ def summary() -> dict:
 
 # ---------------------------------------------------------------- 登录任务
 
-def start_login(email: str) -> dict:
+def start_login(email: str, *, existing_only: bool = False) -> dict:
     email = email.strip()
     if not email or "@" not in email:
         return {"ok": False, "msg": "邮箱格式不对"}
     if not NODE.exists() or not LOGIN_JS.exists():
         return {"ok": False, "msg": "缺少 node.exe 或 login.js"}
     with _lock:
+        if existing_only:
+            account = _find(load(), email)
+            if account is None:
+                return {"ok": False, "msg": "此账号已移除"}
+            email = account["email"]
         for job in _jobs.values():
             if job.get("state") == "running":
                 return {"ok": False, "msg": "已有登录窗口在跑，先完成或关掉它"}
         job_id = str(int(time.time() * 1000))
         _jobs[job_id] = {"state": "running", "email": email,
                          "since": time.time(), "cookies": 0, "msg": "等待登录"}
-    add(email)
+    if not existing_only:
+        add(email)
 
     def worker() -> None:
         env = dict(os.environ)
         env["REWARDS_APP_ROOT"] = str(ROOT)
         env["REWARDS_DATA_DIR"] = str(DATA_DIR)
         env["PLAYWRIGHT_BROWSERS_PATH"] = str(BROWSER_ROOT)
-        proc = subprocess.Popen(
-            [str(NODE), str(LOGIN_JS), "--email", email],
-            cwd=str(ROOT), env=env,
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-            text=True, encoding="utf-8", errors="replace",
-        )
+        try:
+            proc = subprocess.Popen(
+                [str(NODE), str(LOGIN_JS), "--email", email],
+                cwd=str(ROOT), env=env,
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                text=True, encoding="utf-8", errors="replace",
+            )
+        except OSError:
+            _jobs[job_id].update(state="failed", msg="无法打开登录窗口")
+            return
         assert proc.stdout is not None
         for line in proc.stdout:
             line = line.strip()

@@ -886,7 +886,7 @@ def build_status() -> dict:
     }
 
 
-def start_run(only: str | None = None) -> dict:
+def start_run(only: str | None = None, *, retry_account: bool = False) -> dict:
     global _proc
     with _lock:
         if _proc is not None and _proc.poll() is None:
@@ -898,8 +898,16 @@ def start_run(only: str | None = None) -> dict:
         env = dict(os.environ)
         env["REWARDS_DATA_DIR"] = str(DATA_DIR)
         if only:
-            # 只跑一个账号：靠环境变量覆盖，不动 .env
-            env.update(acct.child_env_for(only))
+            try:
+                target_env = acct.child_env_for(only)
+            except OSError:
+                return {"ok": False, "msg": "无法读取账号配置"}
+            if target_env is None:
+                return {"ok": False, "msg": "此账号已移除或停用"}
+            env.update(target_env)
+            env["REWARDS_ONLY_ACCOUNT"] = target_env["ACCOUNT_1_EMAIL"]
+            if retry_account:
+                env["REWARDS_RETRY_ACCOUNT"] = "1"
         else:
             try:
                 acct.write_env()
@@ -912,6 +920,31 @@ def start_run(only: str | None = None) -> dict:
         if _proc is None:
             return {"ok": False, "msg": "已有任务在运行（可能由定时任务启动）"}
         return {"ok": True, "pid": _proc.pid}
+
+
+def run_record(run_id: str) -> dict | None:
+    if not re.fullmatch(r"[1-9][0-9]{0,17}", run_id):
+        return None
+    records = run_history.read(DATA_DIR, run_id=int(run_id))
+    return records[0] if records else None
+
+
+def run_account_action(run_id: str, action: str, body) -> dict:
+    email = body.get("email") if isinstance(body, dict) else None
+    run = run_record(run_id)
+    if not run:
+        return {"ok": False, "msg": "找不到该运行记录"}
+    expected = "needs_login" if action == "login" else "failed"
+    if run["status"] == "running" or not any(
+        row["email"] == email and row["status"] == expected for row in run["accounts"]
+    ):
+        return {"ok": False, "msg": "该账号结果不支持此操作"}
+    if action == "retry":
+        return start_run(email, retry_account=True)
+    with _lock:
+        if run_state() is not None:
+            return {"ok": False, "msg": "请等当前任务结束后再重新登录"}
+        return acct.start_login(email, existing_only=True)
 
 
 def stop_run() -> dict:
@@ -1010,6 +1043,18 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, json.dumps({"runs": run_history.read(DATA_DIR)}, ensure_ascii=False).encode("utf-8"),
                        "application/json; charset=utf-8")
             return
+        if match := re.fullmatch(r"/api/runs/([^/]+)/log", self.path):
+            run = run_record(match[1])
+            result = {"ok": False, "msg": "找不到该运行记录"}
+            if run:
+                try:
+                    result = {"ok": True, **run_history.read_log(DATA_DIR, run, LOG_DIR)}
+                    result["text"] = RE_ANSI.sub("", result["text"])
+                except OSError:
+                    result = {"ok": False, "msg": "无法读取本次日志"}
+            self._send(200 if run else 404, json.dumps(result, ensure_ascii=False).encode("utf-8"),
+                       "application/json; charset=utf-8")
+            return
         if self.path.startswith("/api/accounts"):
             self._send(200, json.dumps(acct.summary(), ensure_ascii=False).encode("utf-8"),
                        "application/json; charset=utf-8")
@@ -1101,8 +1146,14 @@ class Handler(BaseHTTPRequestHandler):
 
         if self.path == "/api/settings/backup":
             result = import_settings(body)
+        elif match := re.fullmatch(r"/api/runs/([^/]+)/(login|retry)", self.path):
+            result = run_account_action(match[1], match[2], body)
         elif self.path == "/api/run":
-            result = start_run(body.get("only") or None)
+            only = body.get("only") if isinstance(body, dict) else False
+            if only is None or isinstance(only, str):
+                result = start_run(only or None)
+            else:
+                result = {"ok": False, "msg": "账号参数不合法"}
         elif self.path == "/api/stop":
             result = stop_run()
         elif self.path == "/api/accounts/login":

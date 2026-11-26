@@ -12,7 +12,15 @@ if (isMainThread) {
         process.chdir(dataDir);
         const config = loadConfig();
         config.sessionPath = path.resolve(dataDir, config.sessionPath);
+        if (process.env.REWARDS_RETRY_ACCOUNT === '1') {
+            if (config.humanize) config.humanize.skipWhenCompletedToday = false;
+            require('./app/dist/util/Humanize.js').markRunSucceeded = () => {};
+        }
         const accounts = loadAccounts();
+        const selectedAccount = process.env.REWARDS_ONLY_ACCOUNT;
+        if (selectedAccount && (accounts.length !== 1 || accounts[0].email.toLowerCase() !== selectedAccount.toLowerCase())) {
+            throw new Error('单账号任务的账号列表与所选账号不一致，已取消运行');
+        }
         if (process.env.REWARDS_RUN_EVENTS) {
             require('./run-events.cjs').observe(process.env.REWARDS_RUN_EVENTS, accounts);
         }

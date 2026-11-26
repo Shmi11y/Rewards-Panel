@@ -97,6 +97,8 @@
   .run-entry summary .run-status{margin:0 8px}
   .run-entry-body{padding:0 0 12px 16px;overflow-wrap:anywhere}
   .run-entry-body td:last-child{white-space:nowrap}
+  .run-entry-actions{margin:10px 0 6px}
+  .run-log{height:auto;max-height:57vh;margin-bottom:0}
   .qrow{display:flex;justify-content:space-between;font-size:13px;padding:9px 0;border-bottom:1px solid var(--line)}
   .qrow:last-child{border:none}
   .qrow b{font-variant-numeric:tabular-nums}
@@ -651,7 +653,18 @@
     <h2 id="runHistoryTitle">最近 7 天的运行记录</h2>
     <form method="dialog"><button class="ghost sm" autofocus>关闭</button></form>
   </div>
+  <p id="runHistoryFeedback" class="sub" role="status" hidden></p>
   <div id="runHistoryList"></div>
+</dialog>
+
+<dialog class="run-dialog" id="runLogDialog" aria-labelledby="runLogTitle">
+  <div class="run-dialog-head">
+    <h2 id="runLogTitle">本次日志</h2>
+    <form method="dialog"><button class="ghost sm" autofocus>返回运行记录</button></form>
+  </div>
+  <p class="sub" id="runLogMeta"></p>
+  <p class="sub" id="runLogFeedback" role="status"></p>
+  <pre class="logbox run-log" id="runLogText" tabindex="0" aria-label="本次运行的日志" hidden></pre>
 </dialog>
 <div id="toast"></div>
 
@@ -840,6 +853,8 @@ const RUN_TIME=new Intl.DateTimeFormat('zh-CN',{
 });
 let historyVersion=null;
 let historyRequest=0;
+let runLogRequest=0;
+let historyActionPending=false;
 
 function runSummary(run){
   const source=run.scheduleKind==='catch_up' ? '定时补跑' : run.scheduleKind==='retry' ? '定时重试' : RUN_SOURCES[run.source]||'任务';
@@ -872,6 +887,12 @@ function renderRecentRun(run){
   }
 }
 
+function historyAccountAction(account){
+  if(account.status==='needs_login') return 'login';
+  if(account.status==='failed') return 'retry';
+  return '';
+}
+
 async function loadRunHistory(){
   const request=++historyRequest;
   const list=$('runHistoryList');
@@ -885,21 +906,95 @@ async function loadRunHistory(){
     list.innerHTML=runs.map((run,index)=>{
       const id=Number(run.id);
       const open=expanded.has(String(id)) || (!previous.length && index===0);
-      const results=run.accounts.map(account=>'<tr><td>'+esc(account.email)+'</td><td>'
-        +runBadge(account.status)+'</td><td>'+fmt(account.points)+'</td></tr>').join('');
+      const results=run.accounts.map(account=>{
+        const action=historyAccountAction(account);
+        const label=action==='login'?'重新登录':'单独重试';
+        const button=action ? '<button class="ghost sm" data-run-action="'+action+'" data-email="'
+          +esc(account.email)+'"'+(historyActionPending?' disabled':'')+'>'+label+'</button>' : '';
+        return '<tr><td>'+esc(account.email)+'</td><td>'+runBadge(account.status)+'</td><td>'
+          +fmt(account.points)+'</td><td>'+button+'</td></tr>';
+      }).join('');
       const note=run.reason ? '<p class="sub">'+esc(run.reason)+'</p>' : '';
-      const accounts=results ? '<table><thead><tr><th>账号</th><th>结果</th><th>新增积分</th></tr></thead><tbody>'
+      const accounts=results ? '<table><thead><tr><th>账号</th><th>结果</th><th>新增积分</th><th>操作</th></tr></thead><tbody>'
         +results+'</tbody></table>' : '<p class="sub">'+(run.status==='running'?'运行结束后显示账号结果':'暂无账号结果')+'</p>';
+      const logButton=run.scheduleKind==='skipped' ? '' : '<div class="run-entry-actions">'
+        +'<button class="ghost sm" data-run-action="log">查看本次日志</button></div>';
       return '<details class="run-entry" data-run="'+id+'"'+(open?' open':'')+'><summary>'
         +runBadge(run.status)+'<span class="k">'+esc(runSummary(run))+'</span></summary><div class="run-entry-body">'
-        +note+accounts+'</div></details>';
+        +note+accounts+logButton+'</div></details>';
     }).join('') || '<div class="empty">最近 7 天暂无运行记录</div>';
   }catch(e){
     if(request===historyRequest) list.innerHTML='<div class="empty">无法读取运行记录，请关闭后重试。</div>';
   }
 }
 
+async function showRunLog(id, summary){
+  const request=++runLogRequest;
+  const dialog=$('runLogDialog'), feedback=$('runLogFeedback'), output=$('runLogText');
+  $('runLogMeta').textContent=summary;
+  feedback.textContent='正在读取本次日志…';
+  output.hidden=true;
+  output.textContent='';
+  dialog.showModal();
+  try{
+    const result=await (await fetch('/api/runs/'+id+'/log',{cache:'no-store'})).json();
+    if(request!==runLogRequest || !dialog.open) return;
+    if(!result.ok) throw new Error(result.msg || '无法读取本次日志');
+    if(!result.text){
+      feedback.textContent='本次运行暂无可用日志。';
+      return;
+    }
+    feedback.textContent=[result.legacy?'旧记录按运行时间从已有日志中提取。':'',
+      result.truncated?'日志较长，显示末尾部分。':''].filter(Boolean).join(' ');
+    output.textContent=result.text;
+    output.hidden=false;
+    output.scrollTop=0;
+  }catch(error){
+    if(request===runLogRequest && dialog.open) feedback.textContent=error.message || '无法读取本次日志';
+  }
+}
+
+function historyFeedback(message){
+  const feedback=$('runHistoryFeedback');
+  feedback.hidden=!message;
+  feedback.textContent=message;
+  if(!$('runHistoryDialog').open && message) toast(message);
+}
+
+$('runHistoryList').onclick=async event=>{
+  const button=event.target.closest('button[data-run-action]');
+  if(!button) return;
+  const entry=button.closest('.run-entry');
+  const {run:id}=entry.dataset, {runAction:action,email}=button.dataset;
+  if(action==='log'){
+    await showRunLog(id,entry.querySelector('summary .k').textContent);
+    return;
+  }
+  if(historyActionPending) return;
+  historyActionPending=true;
+  const accountButtons=()=>$('runHistoryList').querySelectorAll('button[data-email]');
+  accountButtons().forEach(button=>button.disabled=true);
+  const endpoint='/api/runs/'+id+'/'+action;
+  try{
+    if(action==='login'){
+      historyFeedback('正在打开 '+email+' 的登录窗口…');
+      await doLogin(email, endpoint, historyFeedback);
+    }else{
+      historyFeedback('正在重试 '+email+'…');
+      const result=await post(endpoint,{email});
+      historyFeedback(result.ok?'已启动单账号重试：'+email:(result.msg||'重试启动失败'));
+      if(result.ok) await tick();
+    }
+  }catch(error){
+    historyFeedback(action==='login'?'无法打开登录窗口，请重试。':'无法启动重试，请稍后再试。');
+  }finally{
+    historyActionPending=false;
+    accountButtons().forEach(button=>button.disabled=false);
+  }
+};
+
 $('recentRunButton').onclick=()=>{
+  if(!historyActionPending) historyFeedback('');
   $('runHistoryList').innerHTML='<div class="empty">正在读取运行记录…</div>';
   $('runHistoryDialog').showModal();
   loadRunHistory();
@@ -1344,15 +1439,24 @@ async function tick(){
   }catch(e){ $('stateText').textContent='错误: '+(e&&e.message?e.message.slice(0,40):'未知'); $('dot').className='dot'; }
 }
 
-async function doLogin(email){
-  const d=await post('/api/accounts/login',{email});
-  if(!d.ok) return toast(d.msg||'启动失败');
-  toast('登录窗口已打开，请在窗口中完成登录');
-  const timer=setInterval(async()=>{
-    let s={}; try{ s=await (await fetch('/api/login-status?job='+d.job)).json(); }catch(e){}
-    if(s.state==='saved'){ clearInterval(timer); toast('登录成功'); tick(); }
-    else if(s.state==='failed'){ clearInterval(timer); toast('登录失败：'+(s.msg||'窗口已关闭')); tick(); }
-  },2500);
+async function doLogin(email, endpoint='/api/accounts/login', feedback=toast){
+  let result;
+  try{ result=await post(endpoint,{email}); }
+  catch(error){ return feedback('无法打开登录窗口，请重试。'); }
+  if(!result.ok) return feedback(result.msg||'启动失败');
+  feedback('登录窗口已打开，请在窗口中完成登录');
+  return new Promise(resolve=>{
+    const poll=async()=>{
+      let status={};
+      try{ status=await (await fetch('/api/login-status?job='+encodeURIComponent(result.job))).json(); }catch(error){}
+      if(status.state==='saved' || status.state==='failed'){
+        feedback(status.state==='saved'?'登录成功':'登录失败：'+(status.msg||'窗口已关闭'));
+        tick();
+        resolve();
+      }else setTimeout(poll,2500);
+    };
+    setTimeout(poll,2500);
+  });
 }
 
 document.querySelectorAll('.navitem').forEach(n=>n.onclick=()=>nav(n.dataset.nav));

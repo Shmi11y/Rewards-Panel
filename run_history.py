@@ -9,6 +9,7 @@ import sqlite3
 import subprocess
 import sys
 import time
+from collections import deque
 from contextlib import closing
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -41,6 +42,11 @@ SOURCES = ("manual", "daily", "boot")
 ACCOUNT_FAILURES = {"failed", "needs_login", "skipped"}
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 BUSY_EXIT = 75
+RUN_LOG_LIMIT = 512 * 1024
+
+
+def _log_file(data: Path, run_id: int) -> Path:
+    return data / "run-logs" / f"{run_id}.log"
 
 
 def process_alive(pid: int) -> bool:
@@ -119,13 +125,21 @@ def _claim(data: Path, source: str, scheduled_at: int | None, schedule_kind: str
             if process_alive(active["runner_pid"]):
                 return None
             conn.execute("UPDATE runs SET status = 'interrupted', finished_at = ? WHERE id = ?", (now, active["id"]))
-        conn.execute("DELETE FROM runs WHERE started_at < ? AND id != (SELECT MAX(id) FROM runs)", (oldest,))
+        expired = conn.execute(
+            "DELETE FROM runs WHERE started_at < ? AND id != (SELECT MAX(id) FROM runs) RETURNING id", (oldest,)
+        ).fetchall()
         cursor = conn.execute(
             """INSERT INTO runs(source, started_at, status, runner_pid, scheduled_at, schedule_kind)
                VALUES (?, ?, 'running', ?, ?, ?)""",
             (source, now, os.getpid(), scheduled_at, schedule_kind),
         )
-        return cursor.lastrowid
+        run_id = cursor.lastrowid
+    for row in expired:
+        try:
+            _log_file(data, row["id"]).unlink(missing_ok=True)
+        except OSError:
+            pass
+    return run_id
 
 
 def _view(row: sqlite3.Row) -> dict:
@@ -146,17 +160,57 @@ def _history_start() -> float:
     return datetime.combine(datetime.now().date() - timedelta(days=6), datetime.min.time()).timestamp()
 
 
-def read(data: Path, *, latest: bool = False) -> list[dict]:
+def read(data: Path, *, latest: bool = False, run_id: int | None = None) -> list[dict]:
     if not (data / "runs.sqlite3").is_file():
         return []
     with closing(_connect(data)) as conn:
         if not conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'runs'").fetchone():
             return []
-        if latest:
+        if run_id is not None:
+            rows = conn.execute("SELECT * FROM runs WHERE id = ? AND started_at >= ?", (run_id, _history_start()))
+        elif latest:
             rows = conn.execute("SELECT * FROM runs ORDER BY id DESC LIMIT 1")
         else:
             rows = conn.execute("SELECT * FROM runs WHERE started_at >= ? ORDER BY id DESC", (_history_start(),))
         return [_view(row) for row in rows]
+
+
+def read_log(data: Path, run: dict, daily_logs: Path) -> dict:
+    path = _log_file(data, run["id"])
+    try:
+        with path.open("rb") as stream:
+            size = stream.seek(0, os.SEEK_END)
+            stream.seek(max(0, size - RUN_LOG_LIMIT))
+            raw = stream.read(RUN_LOG_LIMIT)
+        truncated = size > RUN_LOG_LIMIT
+        if truncated and b"\n" in raw:
+            raw = raw.split(b"\n", 1)[1]
+        return {"text": raw.decode("utf-8", errors="replace"), "truncated": truncated, "legacy": False}
+    except FileNotFoundError:
+        pass
+
+    result = {"text": "", "truncated": False, "legacy": True}
+    if run["scheduleKind"] == "skipped" or run["finishedAt"] is None:
+        return result
+    start = datetime.fromtimestamp(run["startedAt"])
+    end = datetime.fromtimestamp(run["finishedAt"])
+    first = start.isoformat(sep=" ", timespec="milliseconds")
+    last = end.isoformat(sep=" ", timespec="milliseconds")
+    day = start.date()
+    lines = deque(maxlen=800)
+    while day <= end.date():
+        try:
+            with (daily_logs / f"{day.isoformat()}.log").open(encoding="utf-8", errors="replace") as stream:
+                for line in stream:
+                    if first <= line[:23] <= last:
+                        if len(lines) == lines.maxlen or len(line) > 4096:
+                            result["truncated"] = True
+                        lines.append(line[:4096].rstrip("\r\n"))
+        except FileNotFoundError:
+            pass
+        day += timedelta(days=1)
+    result["text"] = "\n".join(lines)
+    return result
 
 
 def launch(source: str, *, env: dict, output=subprocess.DEVNULL,
@@ -317,6 +371,22 @@ def _notify(data: Path, source: str, status: str, accounts: list[dict]) -> None:
             pass
 
 
+def _capture_output(source, destination) -> None:
+    console = getattr(sys.stdout, "buffer", None)
+    while chunk := source.read1(64 * 1024):
+        if destination is not None:
+            try:
+                destination.write(chunk)
+            except OSError:
+                destination = None
+        if console is not None:
+            try:
+                console.write(chunk)
+                console.flush()
+            except OSError:
+                console = None
+
+
 def run(data: Path, source: str, scheduled_at: int | None = None, schedule_kind: str | None = None) -> int:
     if source in ("daily", "boot"):
         settings = _saved_schedule(data)
@@ -341,14 +411,27 @@ def run(data: Path, source: str, scheduled_at: int | None = None, schedule_kind:
                 reason = f"缺少 {missing.relative_to(ROOT).as_posix()}"
             else:
                 flags = 0 if sys.stdin is not None and sys.stdin.isatty() else NO_WINDOW
-                proc = subprocess.Popen([str(node), "--require", str(preload), str(entry)],
-                                        cwd=ROOT / "app", env=env, creationflags=flags)
-                with closing(_connect(data)) as conn, conn:
-                    conn.execute("UPDATE runs SET engine_pid = ? WHERE id = ?", (proc.pid, run_id))
-                    stop = conn.execute("SELECT stop_requested FROM runs WHERE id = ?", (run_id,)).fetchone()[0]
-                if stop:
-                    _stop_engine(proc.pid)
-                code = proc.wait()
+                path = _log_file(data, run_id)
+                try:
+                    path.parent.mkdir(exist_ok=True)
+                    capture = path.open("wb", buffering=0)
+                except OSError:
+                    capture = None
+                try:
+                    with subprocess.Popen([str(node), "--require", str(preload), str(entry)],
+                                          cwd=ROOT / "app", env=env, creationflags=flags,
+                                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT) as proc:
+                        with closing(_connect(data)) as conn, conn:
+                            conn.execute("UPDATE runs SET engine_pid = ? WHERE id = ?", (proc.pid, run_id))
+                            stop = conn.execute("SELECT stop_requested FROM runs WHERE id = ?", (run_id,)).fetchone()[0]
+                        if stop:
+                            _stop_engine(proc.pid)
+                        assert proc.stdout is not None
+                        _capture_output(proc.stdout, capture)
+                        code = proc.wait()
+                finally:
+                    if capture is not None:
+                        capture.close()
                 status, accounts, points = _results(Path(temp), code)
                 if status in {"failed", "partial"} and not accounts:
                     reason = f"引擎退出，未返回账号结果（退出码 {code}）"
