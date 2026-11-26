@@ -60,7 +60,7 @@ from windows_notifications import valid_run_id
 SESSION_DB = DATA_DIR / "sessions" / "sessions.db"
 CONFIG_FILE = DATA_DIR / "config.json"
 PREFS_FILE = DATA_DIR / "prefs.json"
-PREFS_DEFAULT = {"theme": "light", "onlyActive": False, "keepInTray": False}
+PREFS_DEFAULT = {"theme": "light", "onlyActive": False, "keepInTray": True}
 _prefs_lock = threading.RLock()
 _schedule_lock = threading.Lock()
 _config_lock = threading.Lock()
@@ -647,7 +647,8 @@ def take_window_run() -> int | None:
 
 RE_TS = re.compile(r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\.\d+ ")
 RE_TITLE = re.compile(r'标题="([^"]*)"')
-RE_GAIN = re.compile(r"pointsGained=(\d+) \| currentBalance=(\d+)")
+RE_GAIN = re.compile(r"(?:pointsGained|获得积分)=(\d+)\s*\|\s*(?:currentBalance|当前余额|现余额)=(\d+)")
+RE_BALANCE = re.compile(r"(?:currentBalance|当前余额|现余额|可用积分)\s*(?:=|:)\s*(\d+)")
 RE_QUOTA = re.compile(r"今日可赚取 \| 移动端: (\d+) \| 浏览器: (\d+) \| App: (\d+)")
 RE_PHASE = re.compile(r"\[(DAILY-SET|MORE-PROMOTIONS|SEARCH|LOGIN|BOOTSTRAP|PUNCH)[^\]]*\]\s*(.*)")
 RE_ERROR = re.compile(r"\[ERROR\]")
@@ -709,7 +710,7 @@ def run_state() -> str | None:
 def parse_log() -> dict:
     path = log_path()
     if not path.exists():
-        return {"actions": [], "balance": None, "startBalance": None, "gained": 0,
+        return {"actions": [], "balance": _latest_logged_balance(), "startBalance": None, "gained": 0,
                 "actionCount": 0, "quota": None, "phase": "未开始", "errors": [],
                 "mtime": 0, "lines": 0}
 
@@ -760,6 +761,9 @@ def parse_log() -> dict:
 
             if RE_ERROR.search(line):
                 errors.append(line.strip()[:160])
+
+    if balance is None:
+        balance = _latest_logged_balance()
 
     data = {
         "actions": actions,
@@ -838,6 +842,24 @@ def _slim_log() -> dict:
     out = dict(full)
     out["actions"] = list(full.get("actions") or [])[-40:]
     return out
+
+
+def _latest_logged_balance() -> int | None:
+    """从当前日志和最近运行日志中找最后一个已记录的余额。"""
+    paths = list(LOG_DIR.glob("*.log"))
+    run_logs = DATA_DIR / "run-logs"
+    if run_logs.exists():
+        paths.extend(run_logs.glob("*.log"))
+    for path in sorted(paths, key=lambda item: item.stat().st_mtime, reverse=True):
+        try:
+            lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
+        except OSError:
+            continue
+        for line in reversed(lines):
+            match = RE_BALANCE.search(line)
+            if match:
+                return int(match.group(1))
+    return None
 
 
 def build_status() -> dict:
@@ -1147,6 +1169,12 @@ class Handler(BaseHTTPRequestHandler):
             result = UPDATE_DOWNLOADS.start(body.get("tag") if isinstance(body, dict) else None)
         elif self.path == "/api/update/open-folder":
             result = UPDATE_DOWNLOADS.open_folder()
+        elif self.path == "/api/rewards/redeem":
+            try:
+                os.startfile("https://rewards.bing.com/redeem")
+                result = {"ok": True}
+            except OSError:
+                result = {"ok": False, "msg": "无法打开兑换页，请稍后重试。"}
         elif match := re.fullmatch(r"/api/runs/([^/]+)/(login|retry)", self.path):
             result = run_account_action(match[1], match[2], body)
         elif self.path == "/api/run":

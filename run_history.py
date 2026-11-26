@@ -416,13 +416,20 @@ def _finish(data: Path, run_id: int, status: str, accounts: list[dict], points: 
     return status
 
 
-def _notify(data: Path, run_id: int, source: str, status: str, accounts: list[dict]) -> None:
-    if status not in {"failed", "partial"}:
+def _notify(data: Path, run_id: int, source: str, status: str, accounts: list[dict],
+            points: int | None = None) -> None:
+    if status not in {"success", "failed", "partial"}:
         return
     login_count = sum(account["status"] == "needs_login" for account in accounts)
     source_label = {"manual": "手动任务", "daily": "定时任务", "boot": "开机任务"}[source]
-    title = "Rewards 需要重新登录" if login_count else "Rewards 运行失败"
-    result = f"{login_count} 个账号需要重新登录" if login_count else ("部分账号未完成" if status == "partial" else "运行未完成")
+    if status == "success":
+        title = "Rewards 任务完成"
+        result = "全部账号已完成"
+        if points is not None:
+            result += f"，新增 {points} 积分"
+    else:
+        title = "Rewards 需要重新登录" if login_count else "Rewards 运行失败"
+        result = f"{login_count} 个账号需要重新登录" if login_count else ("部分账号未完成" if status == "partial" else "运行未完成")
     try:
         windows_notifications.show(ROOT, data, run_id, title, f"{source_label}：{result}。点击查看本次运行记录。")
     except Exception as exc:  # The result is already committed, independently of Windows delivery.
@@ -517,7 +524,7 @@ def run(data: Path, source: str, scheduled_at: int | None = None, schedule_kind:
     except OSError:
         reason = "无法启动引擎或读取运行结果"
     status = _finish(data, run_id, status, accounts, points, code, reason)
-    _notify(data, run_id, source, status, accounts)
+    _notify(data, run_id, source, status, accounts, points)
     return code
 
 

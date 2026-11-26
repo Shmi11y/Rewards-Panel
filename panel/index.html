@@ -50,13 +50,15 @@
   header button svg{vertical-align:-1px}
 
   .pill{background:var(--panel2);border:1px solid var(--line);border-radius:999px;padding:3px 12px;font-size:12.5px;color:var(--muted)}
-  button{font:inherit;cursor:pointer;border-radius:9px;border:1px solid var(--line2);background:var(--panel);color:var(--text);padding:7px 15px;transition:.12s}
-  button:hover{border-color:#b8c1cf;background:var(--soft)}
+  button,.button-link{font:inherit;cursor:pointer;border-radius:9px;border:1px solid var(--line2);background:var(--panel);color:var(--text);padding:7px 15px;transition:.12s}
+  button:hover,.button-link:hover{border-color:#b8c1cf;background:var(--soft)}
   button.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:500;box-shadow:0 2px 8px rgba(59,108,246,.25)}
   button.primary:hover{background:#2f5de0}
-  button.ghost{background:transparent}
+  button.ghost,.button-link.ghost{background:transparent}
+  .button-link{display:inline-flex;align-items:center;gap:7px;text-decoration:none;white-space:nowrap}
+  .button-link svg{fill:currentColor;flex:none}
   button:disabled{opacity:.4;cursor:not-allowed}
-  button.sm{padding:0 13px;height:30px;font-size:12.5px;border-radius:9px;display:inline-flex;align-items:center;justify-content:center;gap:4px;line-height:1}
+  button.sm,.button-link.sm{padding:0 13px;height:30px;font-size:12.5px;border-radius:9px;display:inline-flex;align-items:center;justify-content:center;gap:4px;line-height:1}
   .content{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;padding:24px 30px 48px;scrollbar-gutter:stable}
   section[data-page]{display:none;max-width:1240px;margin:0 auto}
   section[data-page].on{display:block;animation:fade .18s ease}
@@ -65,6 +67,9 @@
   .c4{grid-template-columns:repeat(4,1fr)}
   .c2{grid-template-columns:1.5fr 1fr}
   .row.top{align-items:start}
+  .about-columns{display:grid;grid-template-columns:1.5fr 1fr;gap:18px;align-items:start}
+  .about-column{display:grid;gap:18px;align-content:start;min-width:0}
+  @media(max-width:1100px){.about-columns{grid-template-columns:1fr}}
   @media(max-width:1100px){.c4{grid-template-columns:repeat(2,1fr)}.c2{grid-template-columns:1fr}}
   .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:20px 22px;box-shadow:var(--sh)}
   .k{color:var(--muted);font-size:12px}
@@ -78,6 +83,7 @@
   .hero>div:first-child{border-left:none;background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff}
   .hero>div:first-child .k,.hero>div:first-child .sub{color:rgba(255,255,255,.8)}
   .hero>div:first-child .v{color:#fff;font-size:36px}
+  .balance-actions{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px}
   @media(max-width:1100px){.hero{grid-template-columns:1fr 1fr}.hero>div{border-top:1px solid var(--line)}}
   .recent-run{width:100%;display:flex;align-items:center;gap:16px;text-align:left;margin-bottom:18px;padding:14px 22px}
   .recent-run .run-meta{flex:1;min-width:0;color:var(--muted);font-size:13px}
@@ -166,14 +172,6 @@
   .tcard .tt{font-size:13px;font-weight:500}
   .tcard .td{font-size:11.5px;color:var(--dim);line-height:1.5;margin-top:2px}
   .inline{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
-  .github-link{display:inline-flex;align-items:center;gap:7px;min-height:34px;padding:4px 12px;
-    border:1px solid #d0d0d0;border-radius:999px;background:#ededed;color:#24292f;
-    font-weight:600;text-decoration:none;white-space:nowrap;transition:.12s}
-  .github-link:hover{background:#e2e2e2;border-color:#b8b8b8}
-  .github-link:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-  .github-link svg{fill:currentColor;flex:none}
-  html.dark .github-link{background:var(--panel2);border-color:var(--line2);color:var(--text)}
-  html.dark .github-link:hover{background:var(--line2)}
   .chk{display:flex;align-items:center;gap:7px;font-size:13px;color:var(--muted);cursor:pointer}
   .chk input{accent-color:var(--accent);width:15px;height:15px;cursor:pointer}
   .chk:hover{color:var(--text)}
@@ -352,8 +350,9 @@
   <main>
     <header>
       <h1 id="pageTitle">总览</h1>
-      <span class="spacer"></span>
       <select id="accPick" class="accpick" title="切换账号"></select>
+      <button id="btnRefreshAccounts" class="ghost" title="立即读取最新账号状态">刷新状态</button>
+      <span class="spacer"></span>
       <button id="btnRun" class="primary">
         <svg viewBox="0 0 12 12" width="11" height="11" style="margin-right:5px"><path d="M3 2l7 4-7 4z" fill="currentColor"/></svg>开始任务</button>
       <button id="btnStop" class="ghost">
@@ -369,7 +368,15 @@
     <div class="content">
       <section data-page="home" class="on">
         <div class="card hero">
-          <div><div class="k">当前余额</div><div class="v blue" id="sBalance">—</div><div class="sub" id="sBalanceSub">—</div></div>
+          <div>
+            <div class="k">当前余额</div>
+            <div class="v blue" id="sBalance">—</div>
+            <div class="balance-actions">
+              <div class="sub" id="sBalanceSub">—</div>
+              <a class="button-link sm" id="redeemRewards" href="https://rewards.bing.com/redeem" target="_blank"
+                 rel="noopener noreferrer" title="在浏览器打开微软官方兑换页">兑换奖励 <span aria-hidden="true">↗</span></a>
+            </div>
+          </div>
           <div><div class="k">今日新增</div><div class="v gr" id="sGained">—</div><div class="sub" id="sGainedSub">—</div></div>
           <div><div class="k">计分动作</div><div class="v" id="sCount">—</div><div class="sub">今日已完成项目</div></div>
           <div><div class="k">登录会话</div><div class="v" id="sSession" style="font-size:18px;margin-top:8px">—</div><div class="sub" id="sSessionSub">—</div></div>
@@ -474,67 +481,71 @@
         </div>
       </section>
 
-      <section data-page="about">
-        <div class="row c2 top">
-          <div class="card">
-            <h2>自检</h2>
-            <div id="selfBox"><div class="empty">读取中</div></div>
-            <div class="inline" style="margin-top:14px;gap:9px">
-              <button class="ghost" id="selfRun">重新检查</button>
-              <button class="ghost" id="btnClean">清理缓存<span class="sub" id="cacheSize" style="margin-left:6px"></span></button>
-            </div>
-          </div>
-          <div class="card">
-            <h2>关于</h2>
-            <div class="kv" id="aboutBox"></div>
-            <div class="inline" style="margin-top:14px">
-              <button class="ghost" id="checkUpdate">检查更新</button>
-              <a class="github-link" href="https://github.com/Shmi11y/Rewards-Panel/releases/latest"
-                 target="_blank" rel="noopener noreferrer" aria-label="GitHub，打开最新发布页" title="打开 GitHub 发布页">
-                <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
-                  <path d="M6.766 11.328c-2.063-.25-3.516-1.734-3.516-3.656 0-.781.281-1.625.75-2.188-.203-.515-.172-1.609.063-2.062.625-.078 1.468.25 1.968.703.594-.187 1.219-.281 1.985-.281.765 0 1.39.094 1.953.265.484-.437 1.344-.765 1.969-.687.218.422.25 1.515.046 2.047.5.593.766 1.39.766 2.203 0 1.922-1.453 3.375-3.547 3.64.531.344.89 1.094.89 1.954v1.625c0 .468.391.734.86.547C13.781 14.359 16 11.53 16 8.03 16 3.61 12.406 0 7.984 0 3.563 0 0 3.61 0 8.031a7.88 7.88 0 0 0 5.172 7.422c.422.156.828-.125.828-.547v-1.25c-.219.094-.5.156-.75.156-1.031 0-1.64-.562-2.078-1.609-.172-.422-.36-.672-.719-.719-.187-.015-.25-.093-.25-.187 0-.188.313-.328.625-.328.453 0 .844.281 1.25.86.313.452.64.655 1.031.655s.641-.14 1-.5c.266-.265.47-.5.657-.656"/>
-                </svg>
-                GitHub
-              </a>
-            </div>
-            <div class="sub" id="updateStatus" role="status" style="margin-top:8px"></div>
-            <div class="update-details" id="updateRelease" hidden>
-              <p><strong>更新摘要</strong></p>
-              <div class="sub update-notes" id="updateNotes" tabindex="0"></div>
-              <p><button class="ghost" id="downloadUpdate" hidden>下载新版 ZIP</button></p>
-            </div>
-            <div class="update-details" id="updateTransfer" hidden>
-              <p class="sub" id="updateTransferStatus" role="status"></p>
-              <progress id="updateProgress" max="100" aria-label="更新包下载进度"></progress>
-              <div id="updateGuide" hidden>
-                <p class="sub" id="updateArchivePath"></p>
-                <button class="ghost" id="openUpdateFolder">打开下载目录</button>
-                <ol class="sub update-guide">
-                  <li>结束正在运行的任务并退出程序。若面板留在托盘，请从托盘菜单选择「退出程序」。</li>
-                  <li>解压 ZIP，将其中 RewardsPanel 文件夹的内容覆盖到原程序目录，保留 <b>data/</b>。</li>
-                  <li>双击原目录的 Rewards.exe。启用每天定时的用户可重新登录 Windows，让守护进程加载新版。</li>
-                </ol>
+            <section data-page="about">
+        <div class="about-columns">
+          <div class="about-column">
+            <div class="card">
+              <h2>自检</h2>
+              <div id="selfBox"><div class="empty">读取中</div></div>
+              <div class="inline" style="margin-top:14px;gap:9px">
+                <button class="ghost" id="selfRun">重新检查</button>
+                <button class="ghost" id="btnClean">清理缓存<span class="sub" id="cacheSize" style="margin-left:6px"></span></button>
               </div>
             </div>
-            <div class="sub" style="margin-top:14px;line-height:1.9">
-              凭据只存在本机 <b>data\.env</b> 与 <b>data\accounts.json</b>，不上传任何服务器。<br>
-              登录态存在 <b>data\sessions\sessions.db</b>，按账号 + 平台分开保存。
+            <div class="card">
+              <h2>设置备份</h2>
+              <p class="sub">备份仅包含任务设置、定时计划和界面偏好。账号、密码、登录会话和运行记录留在本机。</p>
+              <div class="inline">
+                <button class="ghost" id="exportSettings">导出设置</button>
+                <button class="ghost" id="importSettings">导入设置</button>
+                <input id="settingsBackupFile" type="file" accept=".json,application/json" hidden>
+              </div>
+              <div class="sub" id="backupStatus" role="status" style="margin-top:8px"></div>
             </div>
           </div>
-          <div class="card">
-            <h2>设置备份</h2>
-            <p class="sub">备份仅包含任务设置、定时计划和界面偏好。账号、密码、登录会话和运行记录留在本机。</p>
-            <div class="inline">
-              <button class="ghost" id="exportSettings">导出设置</button>
-              <button class="ghost" id="importSettings">导入设置</button>
-              <input id="settingsBackupFile" type="file" accept=".json,application/json" hidden>
+          <div class="about-column">
+            <div class="card">
+              <h2>关于</h2>
+              <div class="kv" id="aboutBox"></div>
+              <div class="inline" style="margin-top:14px">
+                <button class="ghost" id="checkUpdate">检查更新</button>
+                <a class="button-link ghost" href="https://github.com/Shmi11y/Rewards-Panel/releases/latest"
+                   target="_blank" rel="noopener noreferrer" aria-label="GitHub，打开最新发布页" title="打开 GitHub 发布页">
+                  <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+                    <path d="M6.766 11.328c-2.063-.25-3.516-1.734-3.516-3.656 0-.781.281-1.625.75-2.188-.203-.515-.172-1.609.063-2.062.625-.078 1.468.25 1.968.703.594-.187 1.219-.281 1.985-.281.765 0 1.39.094 1.953.265.484-.437 1.344-.765 1.969-.687.218.422.25 1.515.046 2.047.5.593.766 1.39.766 2.203 0 1.922-1.453 3.375-3.547 3.64.531.344.89 1.094.89 1.954v1.625c0 .468.391.734.86.547C13.781 14.359 16 11.53 16 8.03 16 3.61 12.406 0 7.984 0 3.563 0 0 3.61 0 8.031a7.88 7.88 0 0 0 5.172 7.422c.422.156.828-.125.828-.547v-1.25c-.219.094-.5.156-.75.156-1.031 0-1.64-.562-2.078-1.609-.172-.422-.36-.672-.719-.719-.187-.015-.25-.093-.25-.187 0-.188.313-.328.625-.328.453 0 .844.281 1.25.86.313.452.64.655 1.031.655s.641-.14 1-.5c.266-.265.47-.5.657-.656"/>
+                  </svg>
+                  GitHub
+                </a>
+              </div>
+              <div class="sub" id="updateStatus" role="status" style="margin-top:8px"></div>
+              <div class="update-details" id="updateRelease" hidden>
+                <p><strong>更新摘要</strong></p>
+                <div class="sub update-notes" id="updateNotes" tabindex="0"></div>
+                <p><button class="ghost" id="downloadUpdate" hidden>下载新版 ZIP</button></p>
+              </div>
+              <div class="update-details" id="updateTransfer" hidden>
+                <p class="sub" id="updateTransferStatus" role="status"></p>
+                <progress id="updateProgress" max="100" aria-label="更新包下载进度"></progress>
+                <div id="updateGuide" hidden>
+                  <p class="sub" id="updateArchivePath"></p>
+                  <button class="ghost" id="openUpdateFolder">打开下载目录</button>
+                  <ol class="sub update-guide">
+                    <li>结束正在运行的任务并退出程序。若面板留在托盘，请从托盘菜单选择「退出程序」。</li>
+                    <li>解压 ZIP，将其中 RewardsPanel 文件夹的内容覆盖到原程序目录，保留 <b>data/</b>。</li>
+                    <li>双击原目录的 Rewards.exe。启用每天定时的用户可重新登录 Windows，让守护进程加载新版。</li>
+                  </ol>
+                </div>
+              </div>
+              <div class="sub" style="margin-top:14px;line-height:1.9">
+                凭据只存在本机 <b>data\.env</b> 与 <b>data\accounts.json</b>，不上传任何服务器。<br>
+                登录态存在 <b>data\sessions\sessions.db</b>，按账号 + 平台分开保存。
+              </div>
             </div>
-            <div class="sub" id="backupStatus" role="status" style="margin-top:8px"></div>
-          </div>
-          <div class="card">
-            <h2>脱敏诊断报告</h2>
-            <p class="sub">包含版本、启动日志节选和最近一次失败摘要，可用于反馈问题。</p>
-            <button class="ghost" id="previewDiagnostics">预览诊断报告</button>
+            <div class="card">
+              <h2>脱敏诊断报告</h2>
+              <p class="sub">包含版本、启动日志节选和最近一次失败摘要，可用于反馈问题。</p>
+              <button class="ghost" id="previewDiagnostics">预览诊断报告</button>
+            </div>
           </div>
         </div>
       </section>
@@ -604,7 +615,7 @@
         </div>
         <div class="card">
           <h2>窗口</h2>
-          <label class="chk"><input type="checkbox" id="keepInTray">关闭窗口后留在托盘</label>
+          <label class="chk"><input type="checkbox" id="keepInTray">关闭窗口后留在托盘（默认）</label>
         </div>
         </div>
         <div class="pane" data-pane="t3">
@@ -803,8 +814,19 @@ const PACE = {
           hint:'要跑约 3 小时，一般跑不完。'},
 };
 let STATUS=null, CONFIG=null, DRAFT=null, BUSY=false, PAGE='home', SCH_DIRTY=false, SCH_MODE='manual';
-let SCH_TIMES=['09:10'], LOGS=[], DETAIL=null, PREFS={theme:'light',onlyActive:false,keepInTray:false}, LAST_DETAIL=0;
+let SCH_TIMES=['09:10'], LOGS=[], DETAIL=null, PREFS={theme:'light',onlyActive:false,keepInTray:true}, LAST_DETAIL=0;
 let SCHEDULE_PAUSE_BUSY=false;
+let runNoticeKey=null;
+
+function notifyRunFinished(run){
+  if(!run || run.id==null) return;
+  const key=run.id+':'+run.status;
+  if(runNoticeKey===null){ runNoticeKey=key; return; }
+  if(runNoticeKey===key || run.status==='running') return;
+  runNoticeKey=key;
+  if(run.status==='success') toast('任务已完成'+(run.points!=null?'，新增 '+fmt(run.points)+' 积分':'')+'。');
+  else if(run.status==='partial' || run.status==='failed' || run.status==='needs_login') toast('任务已结束：'+(RUN_STATUSES[run.status]||'请查看运行记录')+'。');
+}
 
 function renderHomeSchedule(schedule){
   if(!schedule) return;
@@ -897,15 +919,17 @@ function dialog(opt){
     $('dlgInput').value=opt.value||'';
     $('dlgInput').placeholder=opt.placeholder||'';
     $('dlgOk').textContent=opt.ok||'确定';
+    $('dlgCancel').textContent=opt.cancel||'取消';
     $('mask').classList.add('on');
     if(inputMode) setTimeout(()=>$('dlgInput').focus(),60);
     const done=v=>{
       $('mask').classList.remove('on');
       $('dlgOk').onclick=null; $('dlgCancel').onclick=null; $('dlgInput').onkeydown=null;
+      $('dlgCancel').textContent='取消';
       resolve(v);
     };
     $('dlgOk').onclick=()=>done(inputMode ? $('dlgInput').value.trim() : true);
-    $('dlgCancel').onclick=()=>done(null);
+    $('dlgCancel').onclick=()=>done(inputMode ? null : (Object.hasOwn(opt,'cancelValue') ? opt.cancelValue : null));
     $('dlgInput').onkeydown=e=>{
       if(e.key==='Enter') done($('dlgInput').value.trim());
       if(e.key==='Escape') done(null);
@@ -1667,6 +1691,16 @@ document.addEventListener('keydown', e=>{
 });
 $('logReload').onclick=()=>loadLogs();
 
+$('btnRefreshAccounts').onclick=async()=>{
+  const button=$('btnRefreshAccounts');
+  button.disabled=true;
+  button.textContent='刷新中…';
+  const refreshed=await tick();
+  button.disabled=false;
+  button.textContent='刷新状态';
+  toast(refreshed?'账号状态已刷新':'刷新失败，请稍后重试');
+};
+
 $('clustersIn').onchange=e=>{
   const n=Math.max(1, Math.min(8, parseInt(e.target.value||'1',10)||1));
   e.target.value=n; DRAFT['clusters']=n;
@@ -1685,6 +1719,7 @@ $('keepInTray').onchange=async e=>{
     const result=await post('/api/prefs',{keepInTray:checkbox.checked});
     if(!result.ok) throw new Error(result.msg||'保存失败');
     PREFS=result.prefs;
+    try{ localStorage.setItem('rewardsCloseChoice',PREFS.keepInTray?'tray':'exit'); }catch(error){}
     toast(PREFS.keepInTray?'托盘模式已开启':'托盘模式已关闭');
   }catch(error){
     checkbox.checked=!!PREFS.keepInTray;
@@ -1694,8 +1729,18 @@ $('keepInTray').onchange=async e=>{
   }
 };
 
-const statusUrl=new URLSearchParams(location.search).get('desktop')==='1'
-  ? '/api/status?desktop=1' : '/api/status';
+const desktopMode=new URLSearchParams(location.search).get('desktop')==='1';
+const statusUrl=desktopMode ? '/api/status?desktop=1' : '/api/status';
+if(desktopMode){
+  $('redeemRewards').onclick=async event=>{
+    event.preventDefault();
+    try{
+      const result=await post('/api/rewards/redeem',{});
+      if(result.ok) return;
+    }catch(error){}
+    toast('无法打开兑换页，请稍后重试。');
+  };
+}
 
 async function tick(){
   try{
@@ -1705,11 +1750,14 @@ async function tick(){
       openRunHistory(d.windowRun);
     }
     STATUS=d;
+    notifyRunFinished(d.latestRun);
     renderHome(d); renderAccounts(d.accounts,d.running); renderDetail(d); renderEnv(d);
     if(!SCH_DIRTY) renderSchedule(d.schedule);
     if(PAGE==='logs') loadLogs();
     if(PAGE==='detail' && Date.now()-LAST_DETAIL > 8000) loadDetail();
+    return true;
   }catch(e){ $('stateText').textContent='错误: '+(e&&e.message?e.message.slice(0,40):'未知'); $('dot').className='dot'; }
+  return false;
 }
 
 async function doLogin(email, endpoint='/api/accounts/login', feedback=toast){
@@ -1934,9 +1982,31 @@ headerEl.addEventListener('dblclick', e => {
   toggleWinMax();
 });
 document.getElementById('wbClose').onclick=()=>{
-  const a=winApi();
-  (a ? a.close() : post('/api/window/close')).catch(()=>{});
+  closeFromPanel();
 };
+async function closeFromPanel(){
+  let choice='';
+  try{ choice=localStorage.getItem('rewardsCloseChoice')||''; }catch(e){}
+  if(choice!=='tray' && choice!=='exit'){
+    choice=await dialog({title:'关闭 Rewards',desc:'请选择关闭窗口后的行为。以后可在「设置 → 窗口」中调整。',input:false,
+      ok:'最小化到托盘',cancel:'退出程序',cancelValue:'exit'});
+    if(choice===null) return;
+    choice=choice==='exit'?'exit':'tray';
+    try{ localStorage.setItem('rewardsCloseChoice',choice); }catch(e){}
+  }
+  const keep=choice==='tray';
+  try{
+    const result=await post('/api/prefs',{keepInTray:keep});
+    if(!result.ok) throw new Error(result.msg||'无法保存关闭选项');
+    PREFS=result.prefs;
+    $('keepInTray').checked=keep;
+  }catch(error){
+    toast(error.message||'无法保存关闭选项');
+    return;
+  }
+  const a=winApi();
+  try{ if(a) await a.close(); else await post('/api/window/close'); }catch(error){ toast('无法关闭窗口'); }
+}
 setTimeout(()=>{
   fetch('/api/ui',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({bridge:!!(window.pywebview&&window.pywebview.api),api:Object.keys((window.pywebview&&window.pywebview.api)||{}).join(','),w:innerWidth,h:innerHeight,dpr:devicePixelRatio})}).catch(()=>{});
