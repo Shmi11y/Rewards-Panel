@@ -13,13 +13,14 @@ from pywintypes import error as Win32Error
 
 class Tray:
     CALLBACK = win32con.WM_APP + 1
-    OPEN, PAUSE, EXIT = 1, 2, 3
+    OPEN, PAUSE, EXIT, TOMORROW, CHOOSE_TIME = 1, 2, 3, 4, 5
 
-    def __init__(self, icon: Path, open_panel, schedule_status, set_paused, exit_app, log) -> None:
+    def __init__(self, icon: Path, open_panel, schedule_status, set_paused, open_pause_picker, exit_app, log) -> None:
         self.icon = icon
         self.open_panel = open_panel
         self.schedule_status = schedule_status
         self.set_paused = set_paused
+        self.open_pause_picker = open_pause_picker
         self.exit_app = exit_app
         self.log = log
         self.hwnd = 0
@@ -116,15 +117,19 @@ class Tray:
         if not status.get("mode"):
             next_run = "暂无法读取"
         elif enabled:
-            next_run = "已暂停" if paused else status.get("nextRun")
+            next_run = status.get("nextRun")
         else:
             next_run = "未启用"
         menu = win32gui.CreatePopupMenu()
         try:
             win32gui.AppendMenu(menu, win32con.MF_STRING, self.OPEN, "打开面板")
-            win32gui.AppendMenu(menu, win32con.MF_STRING | win32con.MF_GRAYED, 0, f"下次运行：{next_run or '—'}")
-            label = "恢复定时" if paused else "暂停定时"
+            deadline = status.get("pauseUntil")
+            info = f"暂停至：{deadline or '手动恢复'}" if enabled and paused else f"下次运行：{next_run or '—'}"
+            win32gui.AppendMenu(menu, win32con.MF_STRING | win32con.MF_GRAYED, 0, info)
+            label = "立即恢复" if paused else "暂停定时（手动恢复）"
             flags = win32con.MF_STRING if enabled else win32con.MF_STRING | win32con.MF_GRAYED
+            win32gui.AppendMenu(menu, flags, self.TOMORROW, "暂停到明天")
+            win32gui.AppendMenu(menu, flags, self.CHOOSE_TIME, "暂停到指定时间…")
             win32gui.AppendMenu(menu, flags, self.PAUSE, label)
             win32gui.AppendMenu(menu, win32con.MF_SEPARATOR, 0, "")
             win32gui.AppendMenu(menu, win32con.MF_STRING, self.EXIT, "退出程序")
@@ -144,6 +149,7 @@ class Tray:
                 win32gui.PostMessage(self.hwnd, win32con.WM_NULL, 0, 0)
 
         command = {self.OPEN: self.open_panel, self.PAUSE: lambda: self.set_paused(not paused),
+                   self.TOMORROW: lambda: self.set_paused(True, "tomorrow"), self.CHOOSE_TIME: self.open_pause_picker,
                    self.EXIT: self.exit_app}.get(choice)
         if command is not None:
             threading.Thread(target=command, daemon=True).start()

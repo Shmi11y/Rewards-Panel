@@ -49,6 +49,7 @@ ACCOUNT_FAILURES = {"failed", "needs_login", "skipped"}
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 BUSY_EXIT = 75
 RUN_LOG_LIMIT = 512 * 1024
+MAX_PAUSE_TIMESTAMP = 32_503_680_000
 
 
 def _log_file(data: Path, run_id: int) -> Path:
@@ -448,12 +449,29 @@ def _capture_output(source, destination) -> None:
                 console = None
 
 
+def valid_pause_deadline(value) -> bool:
+    return type(value) in (int, float) and 0 < value < MAX_PAUSE_TIMESTAMP
+
+
+def schedule_pause_state(settings: dict, now: float) -> tuple[bool, float | None]:
+    if settings.get("paused") is not True:
+        return False, None
+    until = settings.get("pausedUntil")
+    if valid_pause_deadline(until):
+        return now < until, until
+    return True, None
+
+
 def run(data: Path, source: str, scheduled_at: int | None = None, schedule_kind: str | None = None) -> int:
     if source in ("daily", "boot"):
         settings = _saved_schedule(data)
+        paused, deadline = schedule_pause_state(settings, time.time())
         active_after = settings.get("activeAfter")
-        past_plan = scheduled_at is not None and type(active_after) in (int, float) and scheduled_at < active_after
-        if settings.get("paused") is True or past_plan:
+        past_plan = scheduled_at is not None and (
+            (type(active_after) in (int, float) and scheduled_at < active_after)
+            or (deadline is not None and scheduled_at < deadline)
+        )
+        if paused or past_plan:
             return 0 if source == "boot" else BUSY_EXIT
     run_id = _claim(data, source, scheduled_at, schedule_kind)
     if run_id is None:

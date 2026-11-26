@@ -82,7 +82,7 @@ def _norm_time(t: str) -> str | None:
     return None
 
 
-def load() -> dict:
+def load(*, now: float | None = None) -> dict:
     data = dict(DEFAULTS)
     data["done"] = {}
     data["times"] = list(DEFAULTS["times"])
@@ -109,7 +109,14 @@ def load() -> dict:
         data["catchUpMode"] = DEFAULTS["catchUpMode"]
     if type(data["catchUpMinutes"]) is not int or not 1 <= data["catchUpMinutes"] <= MAX_CATCH_UP_MINUTES:
         data["catchUpMinutes"] = DEFAULTS["catchUpMinutes"]
-    data["paused"] = data["paused"] is True
+    paused, deadline = run_history.schedule_pause_state(data, time.time() if now is None else now)
+    data["paused"] = paused
+    if paused and deadline is not None:
+        data["pausedUntil"] = deadline
+    else:
+        data.pop("pausedUntil", None)
+        if deadline is not None:
+            data["activeAfter"] = max(data["activeAfter"], deadline)
     return data
 
 
@@ -236,8 +243,8 @@ def next_run_text(data: dict, now: datetime, done: list[str]) -> str | None:
 
 
 def status() -> dict:
-    data = load()
     now = datetime.now()
+    data = load(now=now.timestamp())
     done = done_today(data, now)
     st = startup_status()
     st.update({
@@ -251,6 +258,10 @@ def status() -> dict:
         "catchUpMode": data["catchUpMode"],
         "catchUpMinutes": data["catchUpMinutes"],
         "paused": data["paused"],
+        "pauseUntil": (
+            datetime.fromtimestamp(data["pausedUntil"]).strftime("%Y-%m-%d %H:%M")
+            if "pausedUntil" in data else None
+        ),
         "nextRun": next_run_text(data, now, done),
         "daemonAlive": _pid_alive(daemon_pid()),
         "pythonw": find_pythonw(),
@@ -288,6 +299,7 @@ def update(mode: str, times=None, retry=None, weekdays_only=None, catch_up_mode=
     data["mode"] = mode
     if mode != previous_plan[0]:
         data["paused"] = False
+        data.pop("pausedUntil", None)
     if (mode, data["times"], data["weekdaysOnly"]) != previous_plan:
         data["activeAfter"] = time.time()
     save(data)
@@ -305,9 +317,24 @@ def sync_automation(mode: str) -> dict:
     return startup
 
 
-def set_paused(paused: bool) -> dict:
-    if type(paused) is not bool:
+def set_paused(paused: bool, until=None) -> dict:
+    if type(paused) is not bool or (not paused and until is not None):
         return {"ok": False, "msg": "暂停设置须为布尔值"}
+    now = datetime.now()
+    deadline = None
+    if until is not None:
+        try:
+            if until == "tomorrow":
+                tomorrow = now.date() + timedelta(days=1)
+                end = datetime.combine(tomorrow, datetime.min.time())
+            else:
+                end = datetime.strptime(until, "%Y-%m-%dT%H:%M")
+            deadline = end.timestamp()
+            if (end <= now or not run_history.valid_pause_deadline(deadline)
+                    or datetime.fromtimestamp(deadline) != end):
+                raise ValueError
+        except (TypeError, ValueError, OverflowError, OSError):
+            return {"ok": False, "msg": "请选择有效的未来日期和时间"}
     data = load()
     if data["mode"] not in ("daily", "boot"):
         return {"ok": False, "msg": "尚未启用自动运行"}
@@ -318,12 +345,19 @@ def set_paused(paused: bool) -> dict:
             running = False
         if not running:
             return {"ok": False, "msg": "定时守护未能启动，请重试"}
-    if paused != data["paused"]:
+    if paused != data["paused"] or deadline != data.get("pausedUntil"):
         data["paused"] = paused
-        if not paused:
-            # Intentional pause time should not become missed runs on resume.
-            data["activeAfter"] = time.time()
+        if deadline is None:
+            data.pop("pausedUntil", None)
+        else:
+            data["pausedUntil"] = deadline
+        data["activeAfter"] = max(data["activeAfter"], time.time())
         save(data)
+    if deadline is not None and data["mode"] == "daily":
+        try:
+            ensure_daemon()
+        except OSError:
+            pass
     return {"ok": True, **status()}
 
 

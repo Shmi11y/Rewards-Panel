@@ -125,19 +125,22 @@ def bind_window_actions(open_panel, close_panel) -> None:
     server._local_close = close_panel
 
 
-def make_tray(open_panel, exit_app):
+def make_tray(open_panel, open_pause_picker, exit_app):
     try:
         from windows_tray import Tray
     except ImportError as exc:
         _log(f"托盘不可用: {exc}")
         return None
 
-    def pause_schedule(paused: bool) -> None:
-        result = api("/api/schedule/pause", "POST", {"paused": paused})
+    def pause_schedule(paused: bool, until: str | None = None) -> None:
+        result = api("/api/schedule/pause", "POST", {"paused": paused, "until": until})
         if not result.get("ok"):
-            _log("无法更新定时暂停状态")
+            msg = result.get("msg") or "无法更新定时暂停状态"
+            _log(msg)
+            ctypes.windll.user32.MessageBoxW(0, msg, TITLE, 0x30)
 
-    return Tray(ICO, open_panel, lambda: api("/api/schedule", timeout=2), pause_schedule, exit_app, _log)
+    return Tray(ICO, open_panel, lambda: api("/api/schedule", timeout=2),
+                pause_schedule, open_pause_picker, exit_app, _log)
 
 
 def ensure_shortcut() -> None:
@@ -394,6 +397,7 @@ def fallback_chromium() -> int:
         args.append(f"--window-position={x},{y}")
     wake = threading.Event()
     browser = None
+    pause_picker = False
 
     def browser_window() -> int:
         if not browser or browser.poll() is not None:
@@ -420,6 +424,11 @@ def fallback_chromium() -> int:
         elif browser and browser.poll() is not None:
             wake.set()
 
+    def open_pause_picker() -> None:
+        nonlocal pause_picker
+        pause_picker = True
+        open_panel()
+
     def close_panel() -> None:
         if hwnd := browser_window():
             ctypes.windll.user32.PostMessageW(hwnd, 0x0010, 0, 0)  # WM_CLOSE
@@ -428,13 +437,17 @@ def fallback_chromium() -> int:
         STATE["quitting"] = True
         wake.set()
 
-    tray = make_tray(open_panel, exit_app)
+    tray = make_tray(open_panel, open_pause_picker, exit_app)
     bind_window_actions(open_panel, close_panel)
     code = 0
     try:
         while not STATE["quitting"]:
             wake.clear()
-            browser = subprocess.Popen(args)
+            browser_args = args.copy()
+            if pause_picker:
+                browser_args[1] += "#schedule-pause"
+                pause_picker = False
+            browser = subprocess.Popen(browser_args)
             code = browser.wait()
             if code or not tray or not keep_in_tray() or not tray.start():
                 break
@@ -495,12 +508,17 @@ def main() -> int:
         if tray:
             tray.close()
 
+    def open_pause_picker() -> None:
+        open_panel()
+        if not STATE["quitting"]:
+            window.evaluate_js("openSchedulePause()")
+
     def exit_app() -> None:
         STATE["quitting"] = True
         stop_task()
         api_obj.close()
 
-    tray = make_tray(open_panel, exit_app)
+    tray = make_tray(open_panel, open_pause_picker, exit_app)
 
     def on_closing(allow_tray: bool = True) -> bool:
         if STATE["quitting"]:

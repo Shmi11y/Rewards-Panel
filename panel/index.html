@@ -101,6 +101,10 @@
   .run-dialog::backdrop{background:rgba(16,23,36,.5)}
   .run-dialog-head{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px}
   .run-dialog-head h2{margin:0;font-size:17px}
+  #schedulePauseDialog{width:min(420px,calc(100% - 44px))}
+  #schedulePauseForm{display:grid;gap:10px}
+  #schedulePauseUntil{width:100%;color-scheme:light dark}
+  #schedulePauseSave{justify-self:end}
   .run-entry{border-top:1px solid var(--line)}
   .run-entry summary{padding:12px 0;cursor:pointer}
   .run-entry summary .run-status{margin:0 8px}
@@ -373,6 +377,8 @@
           <span class="run-status" id="homeScheduleState" role="status">读取中…</span>
           <span class="home-schedule-next"><span class="k" id="homeScheduleNextLabel">下次运行</span><b id="homeScheduleNext">—</b></span>
           <span class="run-status failed" id="homeScheduleWarning" role="status" hidden>定时守护未运行</span>
+          <button class="ghost sm" id="homeScheduleTomorrow" hidden>暂停到明天</button>
+          <button class="ghost sm" id="homeScheduleChoose" hidden>暂停到指定时间</button>
           <button class="ghost sm" id="homeScheduleResume" hidden>恢复定时</button>
         </div>
         <div class="card" style="margin-bottom:18px">
@@ -719,6 +725,19 @@
     <button class="primary" id="saveDiagnostics" disabled>保存诊断报告</button>
   </div>
 </dialog>
+<dialog class="run-dialog" id="schedulePauseDialog" aria-labelledby="schedulePauseTitle">
+  <div class="run-dialog-head">
+    <h2 id="schedulePauseTitle">暂停到指定时间</h2>
+    <form method="dialog"><button class="ghost sm">取消</button></form>
+  </div>
+  <form id="schedulePauseForm">
+    <label class="k" for="schedulePauseUntil">恢复时间（本机时间）</label>
+    <input class="tin" id="schedulePauseUntil" type="datetime-local" required autofocus>
+    <p class="sub">到期自动恢复，暂停期间错过的任务直接跳过。</p>
+    <p class="run-status failed" id="schedulePauseError" role="alert" hidden></p>
+    <button class="primary" id="schedulePauseSave">确认暂停</button>
+  </form>
+</dialog>
 <div id="toast"></div>
 
 <script>
@@ -771,20 +790,24 @@ const PACE = {
 };
 let STATUS=null, CONFIG=null, DRAFT=null, BUSY=false, PAGE='home', SCH_DIRTY=false, SCH_MODE='manual';
 let SCH_TIMES=['09:10'], LOGS=[], DETAIL=null, PREFS={theme:'light',onlyActive:false,keepInTray:false}, LAST_DETAIL=0;
-let SCHEDULE_RESUMING=false;
+let SCHEDULE_PAUSE_BUSY=false;
 
 function renderHomeSchedule(schedule){
   if(!schedule) return;
   const daily=schedule.mode==='daily', boot=schedule.mode==='boot';
-  const paused=(daily || boot) && schedule.paused;
+  const enabled=daily || boot;
+  const paused=enabled && schedule.paused;
   const daemonMissing=daily && !schedule.daemonAlive;
   const state=paused?'已暂停':daily?'每天定时':boot?'开机运行':'未启用';
   if($('homeScheduleState').textContent!==state) $('homeScheduleState').textContent=state;
   $('homeScheduleState').classList.toggle('needs_login',paused);
-  $('homeScheduleNextLabel').textContent=daemonMissing && !paused ? '下次计划' : '下次运行';
-  $('homeScheduleNext').textContent=paused?'—':schedule.nextRun||'—';
+  $('homeScheduleNextLabel').textContent=paused?'暂停至':daemonMissing?'下次计划':'下次运行';
+  $('homeScheduleNext').textContent=paused?schedule.pauseUntil||'手动恢复':schedule.nextRun||'—';
   $('homeScheduleWarning').hidden=!daemonMissing;
+  $('homeScheduleTomorrow').hidden=!enabled;
+  $('homeScheduleChoose').hidden=!enabled;
   $('homeScheduleResume').hidden=!paused && !daemonMissing;
+  $('homeScheduleResume').textContent=paused?'立即恢复':'恢复定时';
 }
 
 function renderSchedule(sc){
@@ -808,7 +831,7 @@ function renderSchedule(sc){
   const flags = ((sc.daily?'定时 ':'') + (sc.boot?'开机 ':'')).trim() || '未写入';
   const doneList = (sc.doneToday || []);
   const rows = [
-    ['下次运行', sc.paused ? '已暂停' : sc.nextRun || '—'],
+    [sc.paused ? '暂停至' : '下次运行', sc.paused ? sc.pauseUntil || '手动恢复' : sc.nextRun || '—'],
     ['今日已处理', doneList.length ? doneList.join('、') : '—'],
     ['守护进程', sc.daemonAlive ? '运行中' : '未运行'],
     ['开机启动项', flags],
@@ -1940,36 +1963,70 @@ $('schSkip').onclick = async () => {
   toast(d.ok ? '今天不再自动运行' : (d.msg||'操作失败'));
   renderSchedule(d);
 };
-async function resumeSchedule(){
-  if(SCHEDULE_RESUMING) return;
-  SCHEDULE_RESUMING=true;
-  const buttons=[$('homeScheduleResume'),$('schResume')];
-  for(const button of buttons){
-    button.disabled=true;
-    button.textContent='恢复中…';
-  }
+async function setSchedulePause(paused, until, feedback=toast){
+  if(SCHEDULE_PAUSE_BUSY) return false;
+  SCHEDULE_PAUSE_BUSY=true;
+  const buttons=['homeScheduleResume','homeScheduleTomorrow','homeScheduleChoose','schResume','schedulePauseSave'].map($);
+  for(const button of buttons) button.disabled=true;
   try{
-    const schedule=await post('/api/schedule/pause',{paused:false});
+    const schedule=await post('/api/schedule/pause',{paused,until});
     if(!schedule.ok){
-      toast(schedule.msg||'恢复定时失败');
-      return;
+      feedback(schedule.msg||'无法更新定时暂停状态');
+      return false;
     }
     if(STATUS) STATUS.schedule=schedule;
     renderHomeSchedule(schedule);
     if(!SCH_DIRTY) renderSchedule(schedule);
-    toast('已恢复定时');
+    toast(paused?`已暂停至 ${schedule.pauseUntil}`:'已恢复定时');
+    return true;
   }catch(error){
-    toast('恢复定时失败，请重试');
+    feedback('无法更新定时暂停状态，请重试');
+    return false;
   }finally{
-    SCHEDULE_RESUMING=false;
-    for(const button of buttons){
-      button.disabled=false;
-      button.textContent='恢复定时';
-    }
+    SCHEDULE_PAUSE_BUSY=false;
+    for(const button of buttons) button.disabled=false;
   }
 }
-$('homeScheduleResume').onclick=resumeSchedule;
-$('schResume').onclick=resumeSchedule;
+
+async function openSchedulePause(){
+  const dialog=$('schedulePauseDialog');
+  if(dialog.open) return;
+  let schedule=STATUS?.schedule;
+  try{
+    const response=await fetch('/api/schedule',{cache:'no-store'});
+    if(response.ok){
+      schedule=await response.json();
+      if(STATUS) STATUS.schedule=schedule;
+      renderHomeSchedule(schedule);
+    }
+  }catch(error){}
+  if(dialog.open) return;
+  const now=Date.now();
+  const localValue=stamp=>{
+    const date=new Date(stamp);
+    return new Date(stamp-date.getTimezoneOffset()*60000).toISOString().slice(0,16);
+  };
+  const input=$('schedulePauseUntil');
+  input.min=localValue((Math.floor(now/60000)+1)*60000);
+  const previous=schedule?.pauseUntil?.replace(' ','T');
+  input.value=previous && previous>=input.min?previous:localValue(now+3600000);
+  $('schedulePauseError').hidden=true;
+  dialog.showModal();
+}
+
+$('homeScheduleResume').onclick=$('schResume').onclick=()=>setSchedulePause(false);
+$('homeScheduleTomorrow').onclick=()=>setSchedulePause(true,'tomorrow');
+$('homeScheduleChoose').onclick=openSchedulePause;
+$('schedulePauseForm').onsubmit=async event=>{
+  event.preventDefault();
+  const error=$('schedulePauseError');
+  error.hidden=true;
+  const updated=await setSchedulePause(true,$('schedulePauseUntil').value,message=>{
+    error.textContent=message;
+    error.hidden=false;
+  });
+  if(updated) $('schedulePauseDialog').close();
+};
 
 (async () => {
   try{
@@ -1979,6 +2036,10 @@ $('schResume').onclick=resumeSchedule;
   $('onlyActive').checked = !!PREFS.onlyActive;
   $('keepInTray').checked = !!PREFS.keepInTray;
   nav('home'); tick(); setInterval(tick, 2500);
+  if(location.hash==='#schedule-pause'){
+    history.replaceState(null,'',location.pathname+location.search);
+    openSchedulePause();
+  }
 })();
 </script>
 </body>

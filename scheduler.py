@@ -75,7 +75,7 @@ def log_mtime() -> float:
         return 0.0
 
 
-def trigger(reason: str, *, source: str = "daily", slot: int | None = None, kind: str | None = None) -> int:
+def trigger(reason: str, *, slot: int, kind: str) -> int:
     """返回新进程 pid，失败返回 0"""
     if task_running():
         log(f"跳过（已有任务在跑）: {reason}")
@@ -85,7 +85,7 @@ def trigger(reason: str, *, source: str = "daily", slot: int | None = None, kind
     (ROOT / "logs").mkdir(exist_ok=True)
     try:
         with (ROOT / "logs" / f"task-{datetime.now():%Y-%m-%d}.out").open("ab") as out:
-            proc = run_history.launch(source, env=env, output=out, scheduled_at=slot, schedule_kind=kind)
+            proc = run_history.launch("daily", env=env, output=out, scheduled_at=slot, schedule_kind=kind)
     except Exception as exc:  # noqa: BLE001
         log(f"启动失败: {exc}")
         return 0
@@ -150,8 +150,6 @@ def plan_daily(settings: dict, now: datetime, previous_poll: float | None, on_ti
 def _loop() -> None:
     PIDFILE.write_text(str(os.getpid()), encoding="utf-8")
     log(f"守护启动 pid={os.getpid()}")
-    booted_at = time.time()
-    boot_once_done = False
     pending = None
     previous_poll = None
     on_time: set[int] = set()
@@ -159,18 +157,13 @@ def _loop() -> None:
     try:
         while True:
             try:
-                sched = schedule.load()
-                mode = "manual" if sched["paused"] else sched["mode"]
                 now = datetime.now()
+                sched = schedule.load(now=now.timestamp())
+                mode = "manual" if sched["paused"] else sched["mode"]
                 retry_left = max(0, min(MAX_RETRY, int(sched.get("retry", 0) or 0)))
 
-                # --- 开机模式 ---
-                if mode == "boot" and not boot_once_done and time.time() - booted_at > sched.get("bootDelay", 60):
-                    if trigger("开机自动运行", source="boot"):
-                        boot_once_done = True
-
                 # --- 每日多时间点 ---
-                elif mode == "daily":
+                if mode == "daily":
                     earliest = schedule.slot_timestamp(now.date() - timedelta(days=6), "00:00")
                     handled = run_history.processed_slots(DATA, earliest)
                     skipped, next_job = plan_daily(sched, now, previous_poll, on_time, handled)

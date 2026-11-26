@@ -376,7 +376,8 @@ def _validate_backup(body: dict) -> None:
             raise ValueError(f"任务设置格式或取值不合法（{key}）")
     _validate_delay_ranges(tasks)
 
-    if (not isinstance(plan, dict) or set(plan) != set(SCHEDULE_BACKUP_KEYS)
+    if (not isinstance(plan, dict) or not set(SCHEDULE_BACKUP_KEYS) <= set(plan)
+            or set(plan).difference(SCHEDULE_BACKUP_KEYS, ("pausedUntil",))
             or plan["mode"] not in ("manual", "daily", "boot")
             or not isinstance(plan["times"], list) or not 1 <= len(plan["times"]) <= sched_mod.MAX_TIMES
             or any(not isinstance(slot, str) or not re.fullmatch(r"(?:[01][0-9]|2[0-3]):[0-5][0-9]", slot)
@@ -387,7 +388,9 @@ def _validate_backup(body: dict) -> None:
             or plan["catchUpMode"] not in ("latest", "skip")
             or type(plan["catchUpMinutes"]) is not int
             or not 1 <= plan["catchUpMinutes"] <= sched_mod.MAX_CATCH_UP_MINUTES
-            or type(plan["bootDelay"]) is not int or not 0 <= plan["bootDelay"] <= 86_400):
+            or type(plan["bootDelay"]) is not int or not 0 <= plan["bootDelay"] <= 86_400
+            or ("pausedUntil" in plan and (not plan["paused"] or plan["mode"] == "manual"
+                                           or not run_history.valid_pause_deadline(plan["pausedUntil"])))):
         raise ValueError("定时计划格式或取值不合法")
     if (not isinstance(prefs, dict) or set(prefs) != set(PREFS_DEFAULT)
             or prefs["theme"] not in ("light", "dark")
@@ -407,6 +410,8 @@ def export_settings() -> dict:
             "schedule": {key: schedule[key] for key in SCHEDULE_BACKUP_KEYS},
             "interface": get_prefs(),
         }
+        if "pausedUntil" in schedule:
+            backup["schedule"]["pausedUntil"] = schedule["pausedUntil"]
         try:
             _validate_backup(backup)
         except ValueError as exc:
@@ -429,6 +434,8 @@ def import_settings(backup: dict) -> dict:
             prefs = _read_prefs()
             plan = sched_mod.load()
             previous_plan = {key: plan[key] for key in SCHEDULE_BACKUP_KEYS}
+            if "pausedUntil" in plan:
+                previous_plan["pausedUntil"] = plan["pausedUntil"]
             imported_plan = {**backup["schedule"], "times": sorted(backup["schedule"]["times"])}
             plan_changed = imported_plan != previous_plan
 
@@ -444,6 +451,7 @@ def import_settings(backup: dict) -> dict:
             _write_settings(PREFS_FILE, prefs)
             saved_files.append((PREFS_FILE, original_prefs))
             if plan_changed:
+                plan.pop("pausedUntil", None)
                 plan.update(imported_plan)
                 plan["activeAfter"] = time.time()
                 sched_mod.save(plan)
@@ -1180,7 +1188,7 @@ class Handler(BaseHTTPRequestHandler):
                 result = sched_mod.skip_today()
         elif self.path == "/api/schedule/pause":
             with _schedule_lock:
-                result = sched_mod.set_paused(body.get("paused"))
+                result = sched_mod.set_paused(body.get("paused"), body.get("until"))
         elif self.path == "/api/ui":
             _ui_state.clear()
             _ui_state.update(body if isinstance(body, dict) else {})
