@@ -61,3 +61,7 @@
 1. 连同本文件与 `docs/upstream-MIT-LICENSE.txt` 一起分发
 2. 如果按 GPL-3.0 理解，需要同时提供 `app/` 的完整对应源码（上游仓库）
 3. 界面文案已重写，但仍建议在 README 中注明「界面设计参考自 xxx 项目」，这是礼貌也是诚信
+
+## 五、GitHub 图标
+
+「关于」页使用 GitHub Octicons 的 `mark-github-16` 图标。MIT 许可见 [docs/octicons-MIT-LICENSE.txt](docs/octicons-MIT-LICENSE.txt)。

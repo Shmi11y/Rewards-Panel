@@ -416,7 +416,7 @@ def _finish(data: Path, run_id: int, status: str, accounts: list[dict], points: 
     return status
 
 
-def _notify(data: Path, source: str, status: str, accounts: list[dict]) -> None:
+def _notify(data: Path, run_id: int, source: str, status: str, accounts: list[dict]) -> None:
     if status not in {"failed", "partial"}:
         return
     login_count = sum(account["status"] == "needs_login" for account in accounts)
@@ -424,7 +424,7 @@ def _notify(data: Path, source: str, status: str, accounts: list[dict]) -> None:
     title = "Rewards 需要重新登录" if login_count else "Rewards 运行失败"
     result = f"{login_count} 个账号需要重新登录" if login_count else ("部分账号未完成" if status == "partial" else "运行未完成")
     try:
-        windows_notifications.show(ROOT, title, f"{source_label}：{result}。详情见 Rewards 面板的运行记录。")
+        windows_notifications.show(ROOT, data, run_id, title, f"{source_label}：{result}。点击查看本次运行记录。")
     except Exception as exc:  # The result is already committed, independently of Windows delivery.
         try:
             with (data / "notifications.log").open("a", encoding="utf-8") as stream:
@@ -517,7 +517,7 @@ def run(data: Path, source: str, scheduled_at: int | None = None, schedule_kind:
     except OSError:
         reason = "无法启动引擎或读取运行结果"
     status = _finish(data, run_id, status, accounts, points, code, reason)
-    _notify(data, source, status, accounts)
+    _notify(data, run_id, source, status, accounts)
     return code
 
 

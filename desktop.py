@@ -29,7 +29,15 @@ ROOT = Path(__file__).resolve().parent
 # The portable Python's ._pth file excludes the script directory.
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
-from windows_notifications import AUMID, register_shortcut
+from windows_notifications import AUMID, parse_activation, register_shortcut, run_scheme
+
+ACTIVATION = parse_activation(sys.argv[1:]) if __name__ == "__main__" and len(sys.argv) > 1 else None
+if __name__ == "__main__" and len(sys.argv) > 1 and ACTIVATION is None:
+    raise SystemExit(2)
+if ACTIVATION is not None:
+    directory, port, _ = ACTIVATION
+    os.environ["REWARDS_DATA_DIR"] = str(directory)
+    os.environ["REWARDS_PORT"] = str(port)
 
 os.environ["REWARDS_APP_ROOT"] = str(ROOT)
 os.environ.setdefault("REWARDS_DATA_DIR", str(ROOT / "data"))
@@ -66,12 +74,14 @@ def port_open(port: int) -> bool:
         return sock.connect_ex(("127.0.0.1", port)) == 0
 
 
-def start_backend() -> None:
+def start_backend(run_id: int | None = None) -> None:
     sys.path.insert(0, str(ROOT / "panel"))
     if port_open(PORT):
         return
     import server  # noqa: PLC0415
 
+    if run_id is not None:
+        server.queue_window_run(run_id)
     threading.Thread(target=server.main, daemon=True).start()
     for _ in range(80):
         if port_open(PORT):
@@ -89,7 +99,8 @@ def token() -> str:
 def page_url() -> str:
     """带令牌的入口地址，首次访问会把 cookie 种下来"""
     t = token()
-    return f"{URL}/?k={t}" if t else URL
+    url = f"{URL}/?desktop=1"
+    return f"{url}&k={t}" if t else url
 
 
 def api(path: str, method: str = "GET", body: dict | None = None, *, timeout: float = 8) -> dict:
@@ -159,9 +170,17 @@ def ensure_shortcut() -> None:
 
 # ---------------------------------------------------------------- 单实例
 
-def activate_existing() -> bool:
-    if port_open(PORT) and api("/api/window/open", "POST", {}, timeout=2).get("ok"):
-        return True
+def activate_existing(run_id: int | None = None, *, wait: bool = False) -> bool:
+    body = {"runId": run_id} if run_id is not None else {}
+    deadline = time.monotonic() + 12
+    while True:
+        if port_open(PORT) and api("/api/window/open", "POST", body, timeout=2).get("ok"):
+            return True
+        if not wait or time.monotonic() >= deadline:
+            break
+        time.sleep(0.2)
+    if run_id is not None:
+        return False
     user32 = ctypes.windll.user32
     hwnd = user32.FindWindowW(None, TITLE)
     if not hwnd:
@@ -442,7 +461,6 @@ def fallback_chromium() -> int:
     code = 0
     try:
         while not STATE["quitting"]:
-            wake.clear()
             browser_args = args.copy()
             if pause_picker:
                 browser_args[1] += "#schedule-pause"
@@ -452,6 +470,7 @@ def fallback_chromium() -> int:
             if code or not tray or not keep_in_tray() or not tray.start():
                 break
             wake.wait()
+            wake.clear()
             tray.close()
         return code
     finally:
@@ -461,11 +480,29 @@ def fallback_chromium() -> int:
 
 
 def main() -> int:
-    if activate_existing():
+    import win32api
+    import win32event
+    import winerror
+
+    # Keep the mutex handle alive for the lifetime of this desktop instance.
+    instance = win32event.CreateMutex(None, False, f"RewardsDesktop-{run_scheme(DATA)}-{PORT}")
+    existing = win32api.GetLastError() == winerror.ERROR_ALREADY_EXISTS
+    try:
+        return run_desktop(existing)
+    finally:
+        instance.Close()
+
+
+def run_desktop(existing: bool) -> int:
+    run_id = ACTIVATION[2] if ACTIVATION else None
+    if activate_existing(run_id, wait=existing):
         _log("已有实例在运行，已激活并退出本次启动")
         return 0
+    if existing or (run_id is not None and port_open(PORT)):
+        _log("无法激活已有实例")
+        return 1
 
-    start_backend()
+    start_backend(run_id)
     if os.environ.get("REWARDS_USE_CHROMIUM_UI") == "1":
         return fallback_chromium()
 
@@ -475,6 +512,11 @@ def main() -> int:
         runtime = bundled_webview_runtime()
         if runtime is not None:
             webview.settings["WEBVIEW2_RUNTIME_PATH"] = str(runtime)
+        elif ACTIVATION:
+            from portable_launcher import system_runtime_available
+
+            if not system_runtime_available():
+                return fallback_chromium()
     except Exception as exc:  # noqa: BLE001
         _log(f"WebView 初始化失败（{exc}），改用内置浏览器窗口")
         return fallback_chromium()
@@ -502,7 +544,7 @@ def main() -> int:
         if STATE["quitting"]:
             return
         window.show()
-        if hwnd := ctypes.windll.user32.FindWindowW(None, TITLE):
+        if hwnd := window.native.Handle.ToInt64():
             foreground(hwnd)
         STATE["hidden"] = False
         if tray:
@@ -561,7 +603,6 @@ def main() -> int:
     threading.Timer(1.5, lambda: learn_delta(window, (w, h))).start()
     threading.Thread(target=geometry_keeper, daemon=True).start()
     api_obj.attach(window)
-    bind_window_actions(open_panel, api_obj.close)
     threading.Thread(target=apply_icon, daemon=True).start()
 
     try:
@@ -574,7 +615,7 @@ def main() -> int:
         _log(f"关闭事件注册失败: {exc}")
 
     try:
-        webview.start()
+        webview.start(lambda: bind_window_actions(open_panel, api_obj.close))
     except Exception as exc:  # noqa: BLE001
         _log(f"桌面窗口启动失败（{exc}），改用内置浏览器窗口")
         if tray:

@@ -55,6 +55,7 @@ import schedule as sched_mod
 import run_history
 import diagnostics
 import updates
+from windows_notifications import valid_run_id
 
 SESSION_DB = DATA_DIR / "sessions" / "sessions.db"
 CONFIG_FILE = DATA_DIR / "config.json"
@@ -625,7 +626,24 @@ _cache = {"key": None, "data": None}
 _ui_state: dict = {}
 _local_close = None   # 由桌面外壳注入，用于关闭窗口
 _local_open = None
+_window_run_lock = threading.Lock()
+_window_run: int | None = None
 _stop_mark: float = 0.0   # 上次手动停止时日志的 mtime，用来压掉"刚跑完仍显示运行中"
+
+
+def queue_window_run(run_id: int) -> None:
+    global _window_run
+    with _window_run_lock:
+        _window_run = run_id
+
+
+def take_window_run() -> int | None:
+    global _window_run
+    with _window_run_lock:
+        run_id = _window_run
+        _window_run = None
+        return run_id
+
 
 RE_TS = re.compile(r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\.\d+ ")
 RE_TITLE = re.compile(r'标题="([^"]*)"')
@@ -1012,7 +1030,10 @@ class Handler(BaseHTTPRequestHandler):
                        "application/json; charset=utf-8")
             return
         if self.path.startswith("/api/status"):
-            self._send(200, json.dumps(build_status(), ensure_ascii=False).encode("utf-8"),
+            status = build_status()
+            if self.path == "/api/status?desktop=1":
+                status["windowRun"] = take_window_run()
+            self._send(200, json.dumps(status, ensure_ascii=False).encode("utf-8"),
                        "application/json; charset=utf-8")
             return
         if self.path == "/api/runs":
@@ -1088,7 +1109,7 @@ class Handler(BaseHTTPRequestHandler):
                                                       "application/octet-stream")
                 self._send(200, target.read_bytes(), ctype)
                 return
-        if self.path in ("/", "/index.html"):
+        if self.path in ("/", "/index.html", "/?desktop=1"):
             self._send(200, (HERE / "index.html").read_bytes(), "text/html; charset=utf-8")
             return
         self._send(404, b"not found", "text/plain")
@@ -1164,8 +1185,14 @@ class Handler(BaseHTTPRequestHandler):
         elif self.path == "/api/browser/install":
             result = install_browser()
         elif self.path in ("/api/window/close", "/api/window/open"):
-            action = _local_close if self.path.endswith("/close") else _local_open
-            if action:
+            opening = self.path.endswith("/open")
+            action = _local_open if opening else _local_close
+            run_id = body.get("runId") if opening and isinstance(body, dict) else None
+            if run_id is not None and not valid_run_id(run_id):
+                result = {"ok": False, "msg": "运行编号不合法"}
+            elif action:
+                if run_id is not None:
+                    queue_window_run(run_id)
                 result = {"ok": True}
                 threading.Timer(0.15, action).start()
             else:

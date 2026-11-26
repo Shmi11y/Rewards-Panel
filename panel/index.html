@@ -166,6 +166,14 @@
   .tcard .tt{font-size:13px;font-weight:500}
   .tcard .td{font-size:11.5px;color:var(--dim);line-height:1.5;margin-top:2px}
   .inline{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+  .github-link{display:inline-flex;align-items:center;gap:7px;min-height:34px;padding:4px 12px;
+    border:1px solid #d0d0d0;border-radius:999px;background:#ededed;color:#24292f;
+    font-weight:600;text-decoration:none;white-space:nowrap;transition:.12s}
+  .github-link:hover{background:#e2e2e2;border-color:#b8b8b8}
+  .github-link:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .github-link svg{fill:currentColor;flex:none}
+  html.dark .github-link{background:var(--panel2);border-color:var(--line2);color:var(--text)}
+  html.dark .github-link:hover{background:var(--line2)}
   .chk{display:flex;align-items:center;gap:7px;font-size:13px;color:var(--muted);cursor:pointer}
   .chk input{accent-color:var(--accent);width:15px;height:15px;cursor:pointer}
   .chk:hover{color:var(--text)}
@@ -481,7 +489,13 @@
             <div class="kv" id="aboutBox"></div>
             <div class="inline" style="margin-top:14px">
               <button class="ghost" id="checkUpdate">检查更新</button>
-              <a href="https://github.com/Shmi11y/Rewards-Panel/releases/latest" target="_blank" rel="noopener noreferrer">打开 GitHub 发布页</a>
+              <a class="github-link" href="https://github.com/Shmi11y/Rewards-Panel/releases/latest"
+                 target="_blank" rel="noopener noreferrer" aria-label="GitHub，打开最新发布页" title="打开 GitHub 发布页">
+                <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+                  <path d="M6.766 11.328c-2.063-.25-3.516-1.734-3.516-3.656 0-.781.281-1.625.75-2.188-.203-.515-.172-1.609.063-2.062.625-.078 1.468.25 1.968.703.594-.187 1.219-.281 1.985-.281.765 0 1.39.094 1.953.265.484-.437 1.344-.765 1.969-.687.218.422.25 1.515.046 2.047.5.593.766 1.39.766 2.203 0 1.922-1.453 3.375-3.547 3.64.531.344.89 1.094.89 1.954v1.625c0 .468.391.734.86.547C13.781 14.359 16 11.53 16 8.03 16 3.61 12.406 0 7.984 0 3.563 0 0 3.61 0 8.031a7.88 7.88 0 0 0 5.172 7.422c.422.156.828-.125.828-.547v-1.25c-.219.094-.5.156-.75.156-1.031 0-1.64-.562-2.078-1.609-.172-.422-.36-.672-.719-.719-.187-.015-.25-.093-.25-.187 0-.188.313-.328.625-.328.453 0 .844.281 1.25.86.313.452.64.655 1.031.655s.641-.14 1-.5c.266-.265.47-.5.657-.656"/>
+                </svg>
+                GitHub
+              </a>
             </div>
             <div class="sub" id="updateStatus" role="status" style="margin-top:8px"></div>
             <div class="update-details" id="updateRelease" hidden>
@@ -947,6 +961,7 @@ const RUN_TIME=new Intl.DateTimeFormat('zh-CN',{
 });
 let historyVersion=null;
 let historyRequest=0;
+let historyTarget=null;
 let runLogRequest=0;
 let historyActionPending=false;
 
@@ -995,11 +1010,13 @@ async function loadRunHistory(){
     if(!response.ok) throw new Error('运行记录读取失败');
     const {runs}=await response.json();
     if(request!==historyRequest || !$('runHistoryDialog').open) return;
+    const target=historyTarget;
+    historyTarget=null;
     const previous=[...list.querySelectorAll('details')];
     const expanded=new Set(previous.filter(item=>item.open).map(item=>item.dataset.run));
     list.innerHTML=runs.map((run,index)=>{
       const id=Number(run.id);
-      const open=expanded.has(String(id)) || (!previous.length && index===0);
+      const open=target!==null ? id===target : expanded.has(String(id)) || (!previous.length && index===0);
       const results=run.accounts.map(account=>{
         const action=historyAccountAction(account);
         const label=action==='login'?'重新登录':'单独重试';
@@ -1017,8 +1034,20 @@ async function loadRunHistory(){
         +runBadge(run.status)+'<span class="k">'+esc(runSummary(run))+'</span></summary><div class="run-entry-body">'
         +note+accounts+logButton+'</div></details>';
     }).join('') || '<div class="empty">最近 7 天暂无运行记录</div>';
+    if(target!==null){
+      const entry=list.querySelector('[data-run="'+target+'"]');
+      if(entry){
+        entry.scrollIntoView({block:'nearest'});
+        entry.querySelector('summary').focus({preventScroll:true});
+      }else{
+        historyFeedback('找不到通知对应的运行记录。这里只显示最近 7 天的记录。');
+      }
+    }
   }catch(e){
-    if(request===historyRequest) list.innerHTML='<div class="empty">无法读取运行记录，请关闭后重试。</div>';
+    if(request===historyRequest){
+      historyTarget=null;
+      list.innerHTML='<div class="empty">无法读取运行记录，请关闭后重试。</div>';
+    }
   }
 }
 
@@ -1087,12 +1116,18 @@ $('runHistoryList').onclick=async event=>{
   }
 };
 
-$('recentRunButton').onclick=()=>{
+function openRunHistory(runId=null){
+  const dialog=$('runHistoryDialog');
+  historyTarget=runId;
   if(!historyActionPending) historyFeedback('');
-  $('runHistoryList').innerHTML='<div class="empty">正在读取运行记录…</div>';
-  $('runHistoryDialog').showModal();
+  if(!dialog.open){
+    $('runHistoryList').innerHTML='<div class="empty">正在读取运行记录…</div>';
+    dialog.showModal();
+  }
   loadRunHistory();
-};
+}
+
+$('recentRunButton').onclick=()=>openRunHistory();
 
 function renderHome(d){
   const log=d.log, acc=d.accounts;
@@ -1659,9 +1694,16 @@ $('keepInTray').onchange=async e=>{
   }
 };
 
+const statusUrl=new URLSearchParams(location.search).get('desktop')==='1'
+  ? '/api/status?desktop=1' : '/api/status';
+
 async function tick(){
   try{
-    const d=await (await fetch('/api/status',{cache:'no-store'})).json();
+    const d=await (await fetch(statusUrl,{cache:'no-store'})).json();
+    if(Number.isSafeInteger(d.windowRun) && d.windowRun>0){
+      $('runLogDialog').close();
+      openRunHistory(d.windowRun);
+    }
     STATUS=d;
     renderHome(d); renderAccounts(d.accounts,d.running); renderDetail(d); renderEnv(d);
     if(!SCH_DIRTY) renderSchedule(d.schedule);
