@@ -278,6 +278,7 @@
   #accGrid{display:flex;flex-direction:column;gap:12px}
   #accGrid .acc{display:grid;grid-template-columns:minmax(180px,1.1fr) auto auto;align-items:center;gap:20px;padding:16px 20px}
   #accGrid .acc .meta{margin:0;grid-template-columns:repeat(3,88px)}
+  #accGrid .acc .meta .session-state{white-space:normal;overflow-wrap:anywhere}
   #accGrid .acc .acts{margin:0;justify-content:flex-end}
   @media(max-width:1080px){
     #accGrid .acc{grid-template-columns:1fr;gap:12px}
@@ -1083,9 +1084,11 @@ function renderHome(d){
   const items=(acc&&acc.items)||[];
   const cur=items.find(a=>a.active)||items[0];
   if(cur){
-      $('sSession').textContent = cur.loggedIn ? '有效' : '需登录';
-    $('sSession').className = 'v ' + (cur.loggedIn?'gr':'am');
-    $('sSessionSub').textContent = cur.loggedIn ? cur.sessionHours+' 小时前更新' : '到「账号」页重新登录';
+    const otherNeedsLogin=items.filter(account=>account!==cur && account.enabled && account.needsLogin).length;
+    $('sSession').textContent=cur.needsLogin?'需重新登录':cur.loggedIn?'有效':'需登录';
+    $('sSession').className='v '+(cur.loggedIn?'gr':'am');
+    const sessionDetail=cur.loggedIn?cur.sessionHours+' 小时前更新':'到「账号」页登录';
+    $('sSessionSub').textContent=otherNeedsLogin?sessionDetail+' · 另有 '+otherNeedsLogin+' 个账号需重登':sessionDetail;
   } else {
     $('sSession').textContent='—'; $('sSession').className='v';
     $('sSessionSub').textContent='—';
@@ -1094,7 +1097,8 @@ function renderHome(d){
   const pts=[]; if(log.startBalance!=null) pts.push(log.startBalance);
   (log.actions||[]).forEach(a=>pts.push(a.balance));
   spark(pts);
-  $('phaseText').textContent = log.phase && log.phase!=='运行中' ? '当前阶段：'+log.phase : '';
+  $('phaseText').textContent = log.phase && log.phase!=='运行中'
+    ? (d.running?'当前阶段：':'最近任务阶段：')+log.phase : '';
 
   $('quotaBox').innerHTML = log.quota
     ? [['移动端',log.quota.mobile],['浏览器',log.quota.browser],['App',log.quota.app]]
@@ -1134,19 +1138,21 @@ function renderAccounts(acc, running){
   $('btnAdd').disabled=running;
   $('accGrid').innerHTML=items.map(a=>{
     const initial=(a.alias||a.email).slice(0,1).toUpperCase();
-    const st = a.loggedIn ? '<span style="color:var(--green)">已登录</span>' : '<span style="color:var(--amber)">未登录</span>';
+    const sessionLabel=a.needsLogin?'需重新登录':a.loggedIn?'已登录':'未登录';
+    const loginLabel=a.needsLogin?'重新登录':a.loggedIn?'重登':'登录';
+    const sessionColor=a.loggedIn?'var(--green)':'var(--amber)';
     return '<div class="acc'+(a.active?' cur':'')+'">'
       +'<div class="top"><div class="av">'+esc(initial)+'</div>'
       +'<div style="min-width:0"><div class="nm">'+esc(a.alias)+(a.active?'<span class="tag">当前</span>':'')+'</div>'
       +'<div class="em">'+esc(a.email)+'</div></div></div>'
       +'<div class="meta">'
       +'<div><div class="k">今日得分</div><div class="m" style="color:var(--green)">'+(a.points?'+'+a.points:'—')+'</div></div>'
-      +'<div><div class="k">状态</div><div class="m" style="font-size:13px">'+st+'</div></div>'
+      +'<div><div class="k">状态</div><div class="m session-state" style="font-size:13px;color:'+sessionColor+'">'+sessionLabel+'</div></div>'
       +'<div><div class="k">会话</div><div class="m" style="font-size:13px">'+(a.loggedIn?a.sessionHours+'h':'—')+'</div></div>'
       +'</div><div class="acts">'
       +(a.active?'':'<button class="sm" data-act="switch" data-email="'+esc(a.email)+'">切换</button>')
       +'<button class="sm" data-act="edit" data-email="'+esc(a.email)+'">编辑</button>'
-      +'<button class="sm" data-act="login" data-email="'+esc(a.email)+'">'+(a.loggedIn?'重登':'登录')+'</button>'
+      +'<button class="sm" data-act="login" data-email="'+esc(a.email)+'">'+loginLabel+'</button>'
       +'<button class="sm" data-act="toggle" data-email="'+esc(a.email)+'" data-on="'+(a.enabled?1:0)+'">'+(a.enabled?'停用':'启用')+'</button>'
       +'<button class="sm" data-act="remove" data-email="'+esc(a.email)+'">删除</button>'
       +'</div></div>';

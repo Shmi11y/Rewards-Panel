@@ -30,6 +30,8 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+import run_history
+
 ROOT = Path(os.environ.get("REWARDS_APP_ROOT") or Path(__file__).resolve().parent.parent)
 DATA_DIR = Path(os.environ.get("REWARDS_DATA_DIR") or ROOT / "data")
 NODE = ROOT / "app" / "node.exe"
@@ -406,18 +408,23 @@ def mask_of(email: str) -> str:
 def summary() -> dict:
     data = load()
     sessions = _session_rows()
+    login_failures = run_history.account_login_failures(DATA_DIR)
     points, balance = _points_by_mask()
     now = time.time() * 1000
     items = []
     for acc in data["accounts"]:
         row = sessions.get(acc["email"], {})
         upd = row.get("desktop") or row.get("mobile")
+        last_login = acc.get("lastLogin")
+        last_verified = last_login if type(last_login) is int else 0
+        needs_login = login_failures.get(acc["email"].casefold(), 0) > last_verified
         items.append({
             "email": acc["email"],
             "alias": acc.get("alias") or acc["email"].split("@")[0],
             "enabled": acc.get("enabled", True),
             "active": (data.get("active") or "").lower() == acc["email"].lower(),
-            "loggedIn": bool(upd),
+            "loggedIn": bool(upd) and not needs_login,
+            "needsLogin": needs_login,
             "sessionHours": round((now - upd) / 3600000, 1) if upd else None,
             "points": points.get(mask_of(acc["email"]), 0),
             "hasTotp": bool(acc.get("totp")),
@@ -486,8 +493,12 @@ def start_login(email: str, *, existing_only: bool = False) -> dict:
             except Exception:
                 continue
             if payload.get("stage") == "saved":
+                try:
+                    mark_login(email)
+                except OSError:
+                    _jobs[job_id].update(state="failed", msg="已保存会话，但无法更新账号登录状态")
+                    continue
                 _jobs[job_id].update(state="saved", cookies=payload.get("cookies", 0), msg="登录成功")
-                mark_login(email)
             elif payload.get("ok") is False:
                 _jobs[job_id].update(state="failed", msg=payload.get("error", "失败"))
         proc.wait()

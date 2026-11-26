@@ -39,6 +39,12 @@ CREATE TABLE IF NOT EXISTS runs (
 )
 """
 SOURCES = ("manual", "daily", "boot")
+LOGIN_FAILURES_SCHEMA = """
+CREATE TABLE account_login_failures (
+    email TEXT PRIMARY KEY,
+    required_at REAL NOT NULL
+)
+"""
 ACCOUNT_FAILURES = {"failed", "needs_login", "skipped"}
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 BUSY_EXIT = 75
@@ -81,6 +87,55 @@ def _begin_write(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE runs ADD COLUMN schedule_kind TEXT")
     conn.execute("""CREATE UNIQUE INDEX IF NOT EXISTS runs_scheduled_slot
                     ON runs(scheduled_at) WHERE schedule_kind != 'retry'""")
+    if not _has_login_failures_table(conn):
+        conn.execute(LOGIN_FAILURES_SCHEMA)
+        _store_login_failures(conn, _historical_login_failures(conn))
+
+
+def _has_login_failures_table(conn: sqlite3.Connection) -> bool:
+    return conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'account_login_failures'").fetchone() is not None
+
+
+def _login_failures(accounts: list[dict], finished_at: float) -> dict[str, float]:
+    return {row["email"].casefold(): row.get("loginRequiredAt", finished_at * 1000)
+            for row in accounts if row["status"] == "needs_login"}
+
+
+def _historical_login_failures(conn: sqlite3.Connection) -> dict[str, float]:
+    failures: dict[str, float] = {}
+    rows = conn.execute("""SELECT accounts, finished_at FROM runs
+                           WHERE finished_at IS NOT NULL AND accounts LIKE '%"needs_login"%'""")
+    for row in rows:
+        try:
+            accounts = json.loads(row["accounts"])
+            for email, required_at in _login_failures(accounts, row["finished_at"]).items():
+                failures[email] = max(required_at, failures.get(email, 0))
+        except (TypeError, ValueError, KeyError):
+            continue
+    return failures
+
+
+def _store_login_failures(conn: sqlite3.Connection, failures: dict[str, float]) -> None:
+    conn.executemany(
+        """INSERT INTO account_login_failures(email, required_at) VALUES (?, ?)
+           ON CONFLICT(email) DO UPDATE SET required_at = MAX(required_at, excluded.required_at)""",
+        failures.items(),
+    )
+
+
+def account_login_failures(data: Path) -> dict[str, float]:
+    if not (data / "runs.sqlite3").is_file():
+        return {}
+    try:
+        with closing(_connect(data)) as conn:
+            conn.execute("BEGIN")
+            if _has_login_failures_table(conn):
+                return dict(conn.execute("SELECT email, required_at FROM account_login_failures"))
+            if conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'runs'").fetchone():
+                return _historical_login_failures(conn)
+    except sqlite3.Error:
+        pass
+    return {}
 
 
 def processed_slots(data: Path, since: int) -> set[int]:
@@ -278,7 +333,7 @@ def request_stop(data: Path) -> dict | None:
 
 def _results(events: Path, code: int) -> tuple[str, list[dict], int | None]:
     accounts: dict[str, dict] = {}
-    login: set[str] = set()
+    login: dict[str, int | None] = {}
     ended = failed = skipped = False
 
     def account(email: str) -> dict:
@@ -302,9 +357,9 @@ def _results(events: Path, code: int) -> tuple[str, list[dict], int | None]:
                 else:
                     row = account(event["email"])
                     if kind == "login":
-                        login.add(row["email"].casefold())
+                        login[row["email"].casefold()] = event.get("at")
                     elif kind == "login_ok":
-                        login.discard(row["email"].casefold())
+                        login.pop(row["email"].casefold(), None)
                     elif kind == "started":
                         row["status"] = "started"
                     else:
@@ -317,6 +372,8 @@ def _results(events: Path, code: int) -> tuple[str, list[dict], int | None]:
             row["status"] = "not_run"
         elif key in login and row["status"] in {"failed", "started"}:
             row["status"] = "needs_login"
+            if login[key] is not None:
+                row["loginRequiredAt"] = login[key]
         elif row["status"] == "pending":
             row["status"] = "not_run"
         elif row["status"] == "started":
@@ -346,10 +403,14 @@ def _finish(data: Path, run_id: int, status: str, accounts: list[dict], points: 
             for account in accounts:
                 if account["status"] in {"unknown", "interrupted"}:
                     account["status"] = "stopped"
+        finished_at = time.time()
+        _store_login_failures(conn, _login_failures(accounts, finished_at))
+        for account in accounts:
+            account.pop("loginRequiredAt", None)
         conn.execute(
             """UPDATE runs SET status = ?, finished_at = ?, accounts = ?, points = ?, exit_code = ?,
                reason = ? WHERE id = ?""",
-            (status, time.time(), json.dumps(accounts, ensure_ascii=False), points, code, reason, run_id),
+            (status, finished_at, json.dumps(accounts, ensure_ascii=False), points, code, reason, run_id),
         )
     return status
 

@@ -11,6 +11,7 @@ function observe(eventsDir, accounts) {
     const eventsPath = path.join(eventsDir, `${process.pid}.jsonl`);
     function emit(event) {
         try {
+            if (event.type === 'login') event.at = Date.now();
             fs.appendFileSync(eventsPath, JSON.stringify(event) + '\n', 'utf8');
         } catch {
             // Recording must not interrupt the task engine.
