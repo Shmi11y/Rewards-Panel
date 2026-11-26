@@ -14,6 +14,7 @@ from pathlib import Path
 from urllib.error import HTTPError
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
+from zipfile import BadZipFile, ZipFile, ZIP_DEFLATED
 
 RELEASE_API = "https://api.github.com/repos/Shmi11y/Rewards-Panel/releases/latest"
 RELEASE_PAGE = "https://github.com/Shmi11y/Rewards-Panel/releases"
@@ -22,6 +23,84 @@ ARCHIVE = "RewardsPanel-windows-x64-lite.zip"
 MAX_BYTES = 512 * 1024 * 1024
 MAX_METADATA = 1024 * 1024
 REQUEST_HEADERS = {"User-Agent": "RewardsPanel"}
+USER_FOLDERS = {"data", "browser", "logs", "ui-profile", "updates", ".git"}
+
+
+def _program_path(root: Path, member: str) -> Path | None:
+    if not member.startswith("RewardsPanel/") or member.endswith("/"):
+        return None
+    parts = member.split("/")[1:]
+    if (any(not part or part in {".", ".."} or part.endswith((".", " "))
+            or any(char in part for char in ':\\<>|?*"') for part in parts)
+            or parts[0].casefold() in USER_FOLDERS or [p.casefold() for p in parts[:2]] == ["app", "logs"]
+            or any(part.casefold().startswith(".env")
+                   or part.casefold() in {"sessions", "accounts.json", "config.json", "sessions.db"}
+                   for part in parts)):
+        return None
+    path = root.joinpath(*parts)
+    if path.resolve() != path or any(p.is_symlink() for p in (path, *path.parents) if p != root):
+        return None
+    return path
+
+
+def prepare_rollback(root: Path, archive: Path, tag: str) -> Path:
+    """Snapshot installed program files that a verified archive can overwrite."""
+    root = root.resolve()
+    folder = root / "updates"
+    folder.mkdir(exist_ok=True)
+    target = folder / "rollback.zip"
+    with tempfile.TemporaryDirectory(dir=folder) as temp:
+        candidate = Path(temp) / target.name
+        with ZipFile(archive) as incoming, ZipFile(candidate, "w", ZIP_DEFLATED, compresslevel=3) as backup:
+            names = set()
+            for member in incoming.namelist():
+                if not member.endswith("/") and _program_path(root, member) is None:
+                    raise ValueError("更新包包含需手动检查的路径，无法创建恢复点")
+                path = _program_path(root, member)
+                if path is not None and path.is_file():
+                    if member.casefold() in names:
+                        raise ValueError("升级包包含重复文件")
+                    backup.write(path, member)
+                    names.add(member.casefold())
+            if not {"rewardspanel/version", "rewardspanel/rewards.exe", "rewardspanel/panel/server.py"} <= names:
+                raise ValueError("没有找到可备份的便携版程序文件")
+            backup.writestr("rewards-rollback.json", json.dumps({
+                "from": (root / "VERSION").read_text(encoding="utf-8").strip(), "to": tag,
+            }))
+        candidate.replace(target)
+    return target
+
+
+def rollback_status(root: Path) -> dict:
+    folder = root / "updates"
+    try:
+        with ZipFile(folder / "rollback.zip") as backup:
+            result = json.loads(backup.read("rewards-rollback.json"))
+    except (OSError, ValueError, KeyError, BadZipFile):
+        result = {}
+    log = folder / "upgrade-history.txt"
+    try:
+        with log.open("rb") as stream:
+            stream.seek(max(0, log.stat().st_size - 4096))
+            result["history"] = stream.read().decode("utf-8", errors="replace").splitlines()[-8:]
+    except OSError:
+        pass
+    return result
+
+
+def record_upgrade(root: Path, version: str | None) -> None:
+    status = rollback_status(root)
+    if not version or version != str(status.get("to", "")).removeprefix("v"):
+        return
+    record = f"Detected v{version} (recovery point: v{status.get('from')})"
+    if any(line.endswith(record) for line in status.get("history", [])):
+        return
+    try:
+        from datetime import datetime
+        with (root / "updates" / "upgrade-history.txt").open("a", encoding="utf-8") as stream:
+            stream.write(f"{datetime.now():%Y-%m-%dT%H:%M:%S} {record}\n")
+    except OSError:
+        pass
 
 
 @dataclass(frozen=True)
@@ -163,8 +242,9 @@ def check(current: str | None) -> tuple[dict, Asset | None]:
 
 
 class UpdateDownloads:
-    def __init__(self, folder: Path) -> None:
+    def __init__(self, folder: Path, root: Path | None = None) -> None:
         self.folder = folder
+        self.root = root
         self._lock = threading.Lock()
         self._asset: Asset | None = None
         self._saved: Path | None = None
@@ -230,9 +310,16 @@ class UpdateDownloads:
             if received == 0 or checksum.hexdigest() != asset.sha256:
                 raise ValueError("SHA-256 校验失败，请重试")
             temporary.replace(target)
+            recovery = None
+            recovery_error = None
+            if self.root is not None and (self.root / "Rewards.exe").is_file():
+                try:
+                    recovery = str(prepare_rollback(self.root, target, asset.tag))
+                except (OSError, ValueError, BadZipFile) as error:
+                    recovery_error = str(error)
             with self._lock:
                 self._saved = target
-                self._state.update(state="ready", path=str(target))
+                self._state.update(state="ready", path=str(target), rollback=recovery, rollbackError=recovery_error)
         except (OSError, HTTPException, ValueError) as error:
             message = str(error) if isinstance(error, ValueError) else "无法下载或保存更新包，请检查网络与磁盘空间"
             with self._lock:

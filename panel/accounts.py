@@ -19,6 +19,8 @@ from __future__ import annotations
 
 import base64
 import ctypes
+from collections import Counter
+from functools import lru_cache
 import json
 import os
 import re
@@ -29,8 +31,10 @@ import threading
 import time
 from datetime import datetime
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 import run_history
+from panel import balance
 
 ROOT = Path(os.environ.get("REWARDS_APP_ROOT") or Path(__file__).resolve().parent.parent)
 DATA_DIR = Path(os.environ.get("REWARDS_DATA_DIR") or ROOT / "data")
@@ -98,6 +102,7 @@ def unprotect(token: str) -> str:
 
 RE_LOG_ACCOUNT = re.compile(r"\[([A-Za-z0-9._%+-]{1,20}\*{2,8})\]")
 RE_GAIN = re.compile(r"pointsGained=(\d+) \| currentBalance=(\d+)")
+RE_BALANCE = re.compile(r"\| (?:currentBalance|当前余额|现余额)=(\d+)(?=\s|$)")
 
 _lock = threading.Lock()
 _jobs: dict[str, dict] = {}
@@ -107,7 +112,7 @@ _jobs: dict[str, dict] = {}
 
 def _blank(email: str) -> dict:
     return {
-        "email": email, "alias": "", "enabled": True,
+        "email": email, "alias": "", "group": "默认", "enabled": True,
         "password": "", "totp": "", "recovery": "", "geo": "auto", "lang": "zh",
         "proxy_http": False, "proxy_url": "", "proxy_port": "",
         "proxy_user": "", "proxy_pass": "",
@@ -215,9 +220,12 @@ def add(email: str, alias: str = "") -> dict:
 
 def update(email: str, fields: dict) -> dict:
     """只更新传入的键；空字符串表示清空；密钥字段传 None 表示不改"""
-    allowed = {"alias", "enabled", "password", "totp", "recovery", "geo", "lang",
+    allowed = {"alias", "group", "enabled", "password", "totp", "recovery", "geo", "lang",
                "proxy_http", "proxy_url", "proxy_port", "proxy_user", "proxy_pass",
                "fp_mobile", "fp_desktop"}
+    if "group" in fields and (not isinstance(fields["group"], str) or
+                              len(fields["group"]) > 32 or not fields["group"].isprintable()):
+        return {"ok": False, "msg": "分组名须为 1 至 32 个可显示字符"}
     with _lock:
         data = load()
         item = _find(data, email)
@@ -348,10 +356,15 @@ def write_env() -> dict:
 
 
 def child_env_for(email: str) -> dict | None:
-    """选定账号映射到 ACCOUNT_1_*，并屏蔽环境和 .env 中其余账号。"""
+    return child_env_for_accounts([email])
+
+
+def child_env_for_accounts(emails: list[str]) -> dict | None:
+    """映射选中的账号并屏蔽环境和 .env 中的其余账号。"""
     with _lock:
-        target = _find(load(), email)
-        if target is None or not target.get("enabled", True):
+        data = load()
+        targets = [_find(data, email) for email in emails]
+        if not targets or any(target is None or not target.get("enabled", True) for target in targets):
             return None
         env = {key: "" for key in os.environ if re.fullmatch(r"ACCOUNT_[1-9][0-9]*_EMAIL", key, re.IGNORECASE)}
         for path in (ENV_FILE, ROOT / "app/.env", ROOT / "app/dist/.env", ROOT / "app/src/.env"):
@@ -361,8 +374,14 @@ def child_env_for(email: str) -> dict | None:
                     if re.fullmatch(r"ACCOUNT_[1-9][0-9]*_EMAIL", key, re.IGNORECASE):
                         env[key] = ""
                 break
-        env.update(line.split("=", 1) for line in _slot_lines(1, target))
+        for slot, target in enumerate(targets, start=1):
+            env.update(line.split("=", 1) for line in _slot_lines(slot, target))
         return env
+
+
+def group_emails(group: str) -> list[str]:
+    return [a["email"] for a in load()["accounts"]
+            if a.get("enabled", True) and (a.get("group") or "默认") == group]
 
 
 # ---------------------------------------------------------------- 会话与积分
@@ -405,11 +424,59 @@ def mask_of(email: str) -> str:
     return (local[:3] + "****") if len(local) > 3 else (local + "****")
 
 
+@lru_cache(maxsize=32)
+def _logged_balances(path: Path, size: int, modified: int) -> dict:
+    rows = {}
+    try:
+        stream = run_history.open_daily_log(path.with_suffix("")) if path.suffix == ".gz" else (
+            path.open(encoding="utf-8", errors="replace")
+        )
+        with stream:
+            for line in stream:
+                if "[RUN-END]" in line:
+                    continue
+                who, points = RE_LOG_ACCOUNT.search(line), RE_BALANCE.search(line)
+                if who and points:
+                    try:
+                        observed = datetime.fromisoformat(line[:23]).timestamp()
+                    except ValueError:
+                        observed = modified / 1_000_000_000
+                    rows[who[1].casefold()] = (int(points[1]), observed)
+    except (OSError, EOFError):
+        pass
+    return rows
+
+
+def account_balances(emails: list[str]) -> dict:
+    try:
+        recorded = balance.recent(DATA_DIR)
+    except sqlite3.Error:
+        recorded = {}
+    counts = Counter(mask_of(email).casefold() for email in emails)
+    pending = {mask_of(email).casefold(): email.casefold() for email in emails if counts[mask_of(email).casefold()] == 1}
+    logs = ROOT / "app" / "logs"
+    for path in sorted(logs.glob("????-??-??.log*"), reverse=True):
+        if not pending:
+            break
+        if path.suffix not in (".log", ".gz"):
+            continue
+        try:
+            info = path.stat()
+        except OSError:
+            continue
+        for mask, (points, observed) in _logged_balances(path, info.st_size, info.st_mtime_ns).items():
+            email = pending.pop(mask, None)
+            if email and observed > recorded.get(email, {}).get("at", 0):
+                recorded[email] = {"balance": points, "at": observed, "source": "log"}
+    return recorded
+
+
 def summary() -> dict:
     data = load()
     sessions = _session_rows()
     login_failures = run_history.account_login_failures(DATA_DIR)
     points, balance = _points_by_mask()
+    balances = account_balances([acc["email"] for acc in data["accounts"]])
     now = time.time() * 1000
     items = []
     for acc in data["accounts"]:
@@ -418,15 +485,20 @@ def summary() -> dict:
         last_login = acc.get("lastLogin")
         last_verified = last_login if type(last_login) is int else 0
         needs_login = login_failures.get(acc["email"].casefold(), 0) > last_verified
+        latest = balances.get(acc["email"].casefold(), {})
         items.append({
             "email": acc["email"],
             "alias": acc.get("alias") or acc["email"].split("@")[0],
+            "group": acc.get("group") or "默认",
             "enabled": acc.get("enabled", True),
             "active": (data.get("active") or "").lower() == acc["email"].lower(),
             "loggedIn": bool(upd) and not needs_login,
             "needsLogin": needs_login,
             "sessionHours": round((now - upd) / 3600000, 1) if upd else None,
             "points": points.get(mask_of(acc["email"]), 0),
+            "balance": latest.get("balance"),
+            "balanceSource": latest.get("source"),
+            "balanceAt": latest.get("at"),
             "hasTotp": bool(acc.get("totp")),
             "hasPassword": bool(acc.get("password")),
             "hasRecovery": bool(acc.get("recovery")),
@@ -474,8 +546,16 @@ def start_login(email: str, *, existing_only: bool = False) -> dict:
         env["REWARDS_DATA_DIR"] = str(DATA_DIR)
         env["PLAYWRIGHT_BROWSERS_PATH"] = str(BROWSER_ROOT)
         try:
+            with TemporaryDirectory(prefix="login-profile.", dir=DATA_DIR, ignore_cleanup_errors=True) as profile:
+                capture_login(env, profile)
+        except OSError:
+            _jobs[job_id].update(state="failed", msg="无法准备登录窗口")
+
+
+    def capture_login(env: dict, profile: str) -> None:
+        try:
             proc = subprocess.Popen(
-                [str(NODE), str(LOGIN_JS), "--email", email],
+                [str(NODE), str(LOGIN_JS), "--email", email, "--profile", profile],
                 cwd=str(ROOT), env=env,
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 text=True, encoding="utf-8", errors="replace",
@@ -484,6 +564,7 @@ def start_login(email: str, *, existing_only: bool = False) -> dict:
             _jobs[job_id].update(state="failed", msg="无法打开登录窗口")
             return
         assert proc.stdout is not None
+        saved_cookies = None
         for line in proc.stdout:
             line = line.strip()
             if not line.startswith("{"):
@@ -498,11 +579,13 @@ def start_login(email: str, *, existing_only: bool = False) -> dict:
                 except OSError:
                     _jobs[job_id].update(state="failed", msg="已保存会话，但无法更新账号登录状态")
                     continue
-                _jobs[job_id].update(state="saved", cookies=payload.get("cookies", 0), msg="登录成功")
+                saved_cookies = payload.get("cookies", 0)
             elif payload.get("ok") is False:
                 _jobs[job_id].update(state="failed", msg=payload.get("error", "失败"))
         proc.wait()
-        if _jobs[job_id]["state"] == "running":
+        if saved_cookies is not None:
+            _jobs[job_id].update(state="saved", cookies=saved_cookies, msg="登录成功")
+        elif _jobs[job_id]["state"] == "running":
             _jobs[job_id].update(state="failed", msg="窗口已关闭或超时")
 
     threading.Thread(target=worker, daemon=True).start()

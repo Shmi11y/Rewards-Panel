@@ -21,6 +21,10 @@ if (isMainThread) {
         if (selectedAccount && (accounts.length !== 1 || accounts[0].email.toLowerCase() !== selectedAccount.toLowerCase())) {
             throw new Error('单账号任务的账号列表与所选账号不一致，已取消运行');
         }
+        const expected = JSON.parse(process.env.REWARDS_SELECTED_ACCOUNTS || 'null');
+        if (expected && JSON.stringify(accounts.map(account => account.email.toLowerCase())) !== JSON.stringify(expected)) {
+            throw new Error('任务账号列表与所选账号不一致，已取消运行');
+        }
         if (process.env.REWARDS_RUN_EVENTS) {
             require('./run-events.cjs').observe(process.env.REWARDS_RUN_EVENTS, accounts);
         }

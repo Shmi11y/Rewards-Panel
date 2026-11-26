@@ -102,13 +102,13 @@ def register_shortcut(root: Path, *, refresh: bool = False) -> Path:
     return path
 
 
-def show(root: Path, data: Path, run_id: int, title: str, message: str) -> None:
-    if not valid_run_id(run_id):
+def show(root: Path, data: Path, run_id: int | None, title: str, message: str) -> None:
+    if run_id is not None and not valid_run_id(run_id):
         raise ValueError("运行编号不合法")
-    scheme = _register_protocol(root, data)
+    uri = f"{_register_protocol(root, data)}://run/{run_id}" if run_id is not None else ""
     register_shortcut(root, refresh=True)
     env = dict(os.environ, REWARDS_TOAST_ID=AUMID, REWARDS_TOAST_TITLE=title,
-               REWARDS_TOAST_BODY=message, REWARDS_TOAST_URI=f"{scheme}://run/{run_id}")
+               REWARDS_TOAST_BODY=message, REWARDS_TOAST_URI=uri)
     script = r"""
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
@@ -120,9 +120,13 @@ try {
     if ($null -ne $setting -and $setting -ne 'Enabled') { throw "Windows notification setting: $setting" }
     [Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType=WindowsRuntime] > $null
     $xml = [Windows.Data.Xml.Dom.XmlDocument]::new()
-    $xml.LoadXml('<toast activationType="protocol"><visual><binding template="ToastGeneric"><text/><text/></binding></visual><actions><action content="查看运行记录" activationType="protocol"/></actions></toast>')
-    $xml.DocumentElement.SetAttribute('launch', $env:REWARDS_TOAST_URI)
-    $xml.GetElementsByTagName('action').Item(0).SetAttribute('arguments', $env:REWARDS_TOAST_URI)
+    if ($env:REWARDS_TOAST_URI) {
+        $xml.LoadXml('<toast activationType="protocol"><visual><binding template="ToastGeneric"><text/><text/></binding></visual><actions><action content="查看运行记录" activationType="protocol"/></actions></toast>')
+        $xml.DocumentElement.SetAttribute('launch', $env:REWARDS_TOAST_URI)
+        $xml.GetElementsByTagName('action').Item(0).SetAttribute('arguments', $env:REWARDS_TOAST_URI)
+    } else {
+        $xml.LoadXml('<toast><visual><binding template="ToastGeneric"><text/><text/></binding></visual></toast>')
+    }
     $text = $xml.GetElementsByTagName('text')
     $text.Item(0).InnerText = $env:REWARDS_TOAST_TITLE
     $text.Item(1).InnerText = $env:REWARDS_TOAST_BODY

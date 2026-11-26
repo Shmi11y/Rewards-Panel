@@ -3,8 +3,11 @@ from __future__ import annotations
 
 import argparse
 import ctypes
+import gzip
 import json
 import os
+import re
+import shutil
 import sqlite3
 import subprocess
 import sys
@@ -13,7 +16,7 @@ from collections import deque
 from contextlib import closing
 from datetime import datetime, timedelta
 from pathlib import Path
-from tempfile import TemporaryDirectory
+from tempfile import NamedTemporaryFile
 
 ROOT = Path(__file__).resolve().parent
 if str(ROOT) not in sys.path:
@@ -49,11 +52,88 @@ ACCOUNT_FAILURES = {"failed", "needs_login", "skipped"}
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 BUSY_EXIT = 75
 RUN_LOG_LIMIT = 512 * 1024
+NOTIFICATION_LIMIT = 200
 MAX_PAUSE_TIMESTAMP = 32_503_680_000
-
 
 def _log_file(data: Path, run_id: int) -> Path:
     return data / "run-logs" / f"{run_id}.log"
+
+
+NOTICE_TYPES = {"success", "failed", "login", "update", "scheduler"}
+
+
+def _notices(data: Path) -> sqlite3.Connection:
+    data.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(data / "notices.sqlite3", timeout=5)
+    conn.row_factory = sqlite3.Row
+    conn.execute("""CREATE TABLE IF NOT EXISTS notices (
+        id INTEGER PRIMARY KEY, event TEXT UNIQUE, category TEXT NOT NULL, runId INTEGER,
+        title TEXT NOT NULL, message TEXT NOT NULL, createdAt REAL NOT NULL, read INTEGER NOT NULL DEFAULT 0
+    )""")
+    conn.execute("CREATE TABLE IF NOT EXISTS muted (category TEXT PRIMARY KEY)")
+    return conn
+
+
+def record_notice(data: Path, category: str, title: str, message: str, *,
+                  run_id: int | None = None, event: str | None = None) -> bool:
+    """Return whether Windows delivery is enabled for a newly recorded event."""
+    try:
+        with closing(_notices(data)) as conn, conn:
+            result = conn.execute(
+                "INSERT OR IGNORE INTO notices(event, category, runId, title, message, createdAt) VALUES(?,?,?,?,?,?)",
+                (event, category, run_id, title, message, time.time()),
+            )
+            conn.execute("DELETE FROM notices WHERE id NOT IN (SELECT id FROM notices ORDER BY id DESC LIMIT ?)",
+                         (NOTIFICATION_LIMIT,))
+            return bool(result.rowcount) and conn.execute(
+                "SELECT 1 FROM muted WHERE category = ?", (category,),
+            ).fetchone() is None
+    except (OSError, sqlite3.Error):
+        return True
+
+
+def read_notifications(data: Path) -> dict:
+    if not (data / "notices.sqlite3").is_file():
+        return {"notifications": [], "muted": [], "unread": 0}
+    with closing(_notices(data)) as conn:
+        rows = [dict(row) for row in conn.execute(
+            "SELECT id, category, runId, title, message, createdAt, read FROM notices ORDER BY id DESC")]
+        muted = [row[0] for row in conn.execute("SELECT category FROM muted")]
+    return {"notifications": rows, "muted": muted,
+            "unread": sum(not row["read"] and row["category"] not in muted for row in rows)}
+
+
+def change_notifications(data: Path, action: str, muted=None) -> dict:
+    with closing(_notices(data)) as conn, conn:
+        if action == "clear":
+            conn.execute("DELETE FROM notices")
+        elif action == "read":
+            conn.execute("UPDATE notices SET read=1")
+        elif action == "preferences":
+            if not isinstance(muted, list) or any(not isinstance(key, str) or key not in NOTICE_TYPES for key in muted):
+                return {"ok": False, "msg": "通知类型不合法"}
+            conn.execute("DELETE FROM muted")
+            conn.executemany("INSERT OR IGNORE INTO muted VALUES (?)", [(key,) for key in muted])
+        else:
+            return {"ok": False, "msg": "未知通知操作"}
+    return {"ok": True, **read_notifications(data)}
+
+
+def progress(data: Path, run: dict, history: list[dict]) -> dict:
+    rows, _, _, _ = _read_events(data / "run-events" / str(run["id"]))
+    accounts = list(rows.values())
+    elapsed = max(0, round(time.time() - run["startedAt"]))
+    completed = sum(row["status"] not in {"started", "pending"} for row in accounts)
+    previous = next((item for item in history if item["id"] != run["id"]
+                     and item["status"] == "success" and item["source"] == run["source"]
+                     and {row["email"].casefold() for row in item["accounts"]} == set(rows)), None)
+    estimate = None
+    if previous and previous["finishedAt"]:
+        remaining = round(previous["finishedAt"] - previous["startedAt"]) - elapsed
+        if remaining > 0:
+            estimate = remaining
+    return {"runId": run["id"], "accounts": accounts, "completed": completed, "total": len(accounts),
+            "elapsedSeconds": elapsed, "remainingSeconds": estimate}
 
 
 def process_alive(pid: int) -> bool:
@@ -256,17 +336,62 @@ def read_log(data: Path, run: dict, daily_logs: Path) -> dict:
     lines = deque(maxlen=800)
     while day <= end.date():
         try:
-            with (daily_logs / f"{day.isoformat()}.log").open(encoding="utf-8", errors="replace") as stream:
+            with open_daily_log(daily_logs / f"{day.isoformat()}.log") as stream:
                 for line in stream:
                     if first <= line[:23] <= last:
                         if len(lines) == lines.maxlen or len(line) > 4096:
                             result["truncated"] = True
                         lines.append(line[:4096].rstrip("\r\n"))
-        except FileNotFoundError:
+        except (OSError, EOFError):
             pass
         day += timedelta(days=1)
     result["text"] = "\n".join(lines)
     return result
+
+
+def open_daily_log(path: Path):
+    try:
+        return path.open(encoding="utf-8", errors="replace")
+    except FileNotFoundError:
+        return gzip.open(path.with_suffix(".log.gz"), "rt", encoding="utf-8", errors="replace")
+
+
+def maintain_daily_logs(folder: Path, keep_days: int = 30) -> dict:
+    today = datetime.now().date()
+    cutoff = today - timedelta(days=keep_days)
+    removed = freed = compressed = 0
+    for path in folder.iterdir() if folder.is_dir() else []:
+        match = re.fullmatch(r"(\d{4}-\d{2}-\d{2})\.log(?:\.gz)?", path.name)
+        if match is None:
+            continue
+        temporary = None
+        try:
+            day = datetime.strptime(match[1], "%Y-%m-%d").date()
+            info = path.stat()
+            size = info.st_size
+            if day < cutoff:
+                path.unlink()
+                removed += 1
+                freed += size
+            elif day < today and path.suffix == ".log":
+                archive = path.with_suffix(".log.gz")
+                if archive.exists():
+                    continue
+                with NamedTemporaryFile(dir=folder, delete=False) as target:
+                    temporary = Path(target.name)
+                    with path.open("rb") as stream, gzip.GzipFile(fileobj=target, mode="wb") as output:
+                        shutil.copyfileobj(stream, output)
+                os.utime(temporary, ns=(info.st_atime_ns, info.st_mtime_ns))
+                temporary.replace(archive)
+                path.unlink()
+                compressed += 1
+                freed += max(0, size - archive.stat().st_size)
+        except (OSError, ValueError):
+            pass
+        finally:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
+    return {"removed": removed, "freed": freed, "compressed": compressed}
 
 
 def launch(source: str, *, env: dict, output=subprocess.DEVNULL,
@@ -332,7 +457,7 @@ def request_stop(data: Path) -> dict | None:
     return {"ok": True, "stopped": row["engine_pid"] or row["runner_pid"]}
 
 
-def _results(events: Path, code: int) -> tuple[str, list[dict], int | None]:
+def _read_events(events: Path) -> tuple[dict, dict, tuple[bool, bool], bool]:
     accounts: dict[str, dict] = {}
     login: dict[str, int | None] = {}
     ended = failed = skipped = False
@@ -341,7 +466,11 @@ def _results(events: Path, code: int) -> tuple[str, list[dict], int | None]:
         return accounts.setdefault(email.casefold(), {"email": email, "status": "pending", "points": None})
 
     for path in events.glob("*.jsonl"):
-        with path.open(encoding="utf-8") as stream:
+        try:
+            stream = path.open(encoding="utf-8", errors="replace")
+        except FileNotFoundError:
+            continue
+        with stream:
             for line in stream:
                 try:
                     event = json.loads(line)
@@ -363,12 +492,22 @@ def _results(events: Path, code: int) -> tuple[str, list[dict], int | None]:
                         login.pop(row["email"].casefold(), None)
                     elif kind == "started":
                         row["status"] = "started"
+                    elif kind == "phase":
+                        row["phase"] = event["phase"]
                     else:
                         row["status"] = "failed" if kind == "partial" else kind
                         if event.get("points") is not None:
                             row["points"] = event["points"]
+                        if type(event.get("balance")) is int:
+                            row["balance"] = event["balance"]
 
+    return accounts, login, (ended, failed), skipped
+
+
+def _results(events: Path, code: int) -> tuple[str, list[dict], int | None]:
+    accounts, login, (ended, failed), skipped = _read_events(events)
     for key, row in accounts.items():
+        row.pop("phase", None)
         if skipped:
             row["status"] = "not_run"
         elif key in login and row["status"] in {"failed", "started"}:
@@ -402,7 +541,7 @@ def _finish(data: Path, run_id: int, status: str, accounts: list[dict], points: 
         if row["stop_requested"]:
             status, reason = "stopped", None
             for account in accounts:
-                if account["status"] in {"unknown", "interrupted"}:
+                if account["status"] in {"unknown", "interrupted", "not_run"}:
                     account["status"] = "stopped"
         finished_at = time.time()
         _store_login_failures(conn, _login_failures(accounts, finished_at))
@@ -430,8 +569,12 @@ def _notify(data: Path, run_id: int, source: str, status: str, accounts: list[di
     else:
         title = "Rewards 需要重新登录" if login_count else "Rewards 运行失败"
         result = f"{login_count} 个账号需要重新登录" if login_count else ("部分账号未完成" if status == "partial" else "运行未完成")
+    message = f"{source_label}：{result}。点击查看本次运行记录。"
+    category = "login" if login_count else "success" if status == "success" else "failed"
+    if not record_notice(data, category, title, message, run_id=run_id, event=f"run:{run_id}"):
+        return
     try:
-        windows_notifications.show(ROOT, data, run_id, title, f"{source_label}：{result}。点击查看本次运行记录。")
+        windows_notifications.show(ROOT, data, run_id, title, message)
     except Exception as exc:  # The result is already committed, independently of Windows delivery.
         try:
             with (data / "notifications.log").open("a", encoding="utf-8") as stream:
@@ -487,9 +630,12 @@ def run(data: Path, source: str, scheduled_at: int | None = None, schedule_kind:
     status, accounts, points = "failed", [], None
     try:
         (data / "task.pid").write_text(str(os.getpid()), encoding="utf-8")
-        with TemporaryDirectory(prefix="run-events-", dir=data) as temp:
+        maintain_daily_logs(ROOT / "app" / "logs")
+        events = data / "run-events" / str(run_id)
+        events.mkdir(parents=True, exist_ok=True)
+        try:
             env = dict(os.environ, REWARDS_DATA_DIR=str(data), REWARDS_APP_ROOT=str(ROOT),
-                       PLAYWRIGHT_BROWSERS_PATH=str(ROOT / "browser"), REWARDS_RUN_EVENTS=temp,
+                       PLAYWRIGHT_BROWSERS_PATH=str(ROOT / "browser"), REWARDS_RUN_EVENTS=str(events),
                        NODE_NO_WARNINGS="1")
             node, entry, preload = ROOT / "app/node.exe", ROOT / "app/dist/index.js", ROOT / "task-data.cjs"
             missing = next((path for path in (node, entry, preload) if not path.is_file()), None)
@@ -518,12 +664,23 @@ def run(data: Path, source: str, scheduled_at: int | None = None, schedule_kind:
                 finally:
                     if capture is not None:
                         capture.close()
-                status, accounts, points = _results(Path(temp), code)
+                status, accounts, points = _results(events, code)
                 if status in {"failed", "partial"} and not accounts:
                     reason = f"引擎退出，未返回账号结果（退出码 {code}）"
+        finally:
+            for event_file in events.glob("*.jsonl"):
+                event_file.unlink(missing_ok=True)
+            events.rmdir()
     except OSError:
         reason = "无法启动引擎或读取运行结果"
     status = _finish(data, run_id, status, accounts, points, code, reason)
+    try:
+        from panel import balance
+        for account in accounts:
+            if "balance" in account:
+                balance.save(data, account["email"], account["balance"], time.time(), "log")
+    except (OSError, sqlite3.Error):
+        pass
     _notify(data, run_id, source, status, accounts, points)
     return code
 

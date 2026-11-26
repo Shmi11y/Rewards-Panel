@@ -15,8 +15,10 @@ Rewards 定时守护
 """
 from __future__ import annotations
 
+import json
 import msvcrt
 import os
+import subprocess
 import sys
 import time
 from datetime import datetime, timedelta
@@ -82,6 +84,18 @@ def trigger(reason: str, *, slot: int, kind: str) -> int:
         return 0
 
     env = dict(os.environ, REWARDS_DATA_DIR=str(DATA))
+    slot_name = datetime.fromtimestamp(slot).strftime("%H:%M")
+    group = schedule.load()["groups"].get(slot_name)
+    if group:
+        from panel import accounts
+
+        targets = accounts.group_emails(group)
+        selected = accounts.child_env_for_accounts(targets)
+        if selected is None:
+            run_history.record_skips(DATA, [(slot, f"分组「{group}」没有启用的账号")])
+            return 0
+        env.update(selected)
+        env["REWARDS_SELECTED_ACCOUNTS"] = json.dumps([email.lower() for email in targets])
     (ROOT / "logs").mkdir(exist_ok=True)
     try:
         with (ROOT / "logs" / f"task-{datetime.now():%Y-%m-%d}.out").open("ab") as out:
@@ -223,15 +237,60 @@ def _loop() -> None:
         log("守护退出")
 
 
+def supervise() -> None:
+    failures = 0
+    while schedule.load()["mode"] == "daily":
+        started = time.monotonic()
+        try:
+            with subprocess.Popen([sys.executable, __file__, "--worker"], cwd=ROOT,
+                                  creationflags=run_history.NO_WINDOW) as worker:
+                while worker.poll() is None:
+                    if schedule.load()["mode"] != "daily":
+                        worker.terminate()
+                        return
+                    time.sleep(3)
+                reason = f"退出码 {worker.returncode}"
+        except OSError:
+            reason = "无法启动守护进程"
+        if schedule.load()["mode"] != "daily":
+            return
+        if time.monotonic() - started >= 300:
+            failures = 0
+        failures += 1
+        delay = min(300, 5 * 2 ** min(failures - 1, 6))
+        log(f"守护异常（{reason}），第 {failures} 次重启将在 {delay} 秒后尝试")
+        if failures == 3:
+            title = "Rewards 定时守护连续异常"
+            message = f"守护已连续退出 {failures} 次（{reason}），仍在尝试恢复。"
+            if run_history.record_notice(DATA, "scheduler", title, message):
+                try:
+                    run_history.windows_notifications.show(ROOT, DATA, None, title, message)
+                except (OSError, RuntimeError, subprocess.SubprocessError):
+                    log("无法发送守护异常通知")
+        for _ in range(delay):
+            if schedule.load()["mode"] != "daily":
+                return
+            time.sleep(1)
+
+
 def main() -> None:
     DATA.mkdir(parents=True, exist_ok=True)
-    with (DATA / "scheduler.lock").open("a+b") as lock:
+    worker = sys.argv[1:] == ["--worker"]
+    name = "scheduler.lock" if worker else "scheduler-supervisor.lock"
+    with (DATA / name).open("a+b") as lock:
         lock.seek(0)
         try:
             msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
         except OSError:
             return
-        _loop()
+        if worker:
+            _loop()
+        else:
+            schedule.SUPERVISOR_PIDFILE.write_text(str(os.getpid()), encoding="utf-8")
+            try:
+                supervise()
+            finally:
+                schedule.SUPERVISOR_PIDFILE.unlink(missing_ok=True)
 
 
 if __name__ == "__main__":

@@ -5,6 +5,14 @@ const path = require('node:path');
 const cluster = require('node:cluster');
 
 const LOGIN_REQUIRED = /没有可用的(?:非交互|受支持)登录方式|未配置密码且无法返回登录方式选择|需要(?:手动|人工|重新)登录|登录(?:态|会话)(?:已)?(?:过期|失效)|Login failed or aborted at state: (?:PASSWORD_INPUT|RECOVERY_EMAIL_INPUT|EMAIL_VERIFICATION_INPUT|SIGN_IN_METHOD_PICKER|LOGIN_PASSWORDLESS|2FA_TOTP|OTP_CODE_ENTRY)|Microsoft login error:|Passwordless authentication timeout|Recovery email is required/i;
+const PHASES = {
+    LOGIN: '验证登录', BOOTSTRAP: '读取奖励信息', POINTS: '读取积分和配额',
+    'DAILY-SET': '每日任务', 'MORE-PROMOTIONS': '更多推广',
+    'SEARCH-BING': '必应搜索', 'SEARCH-ON-BING': '活动搜索',
+    'READ-TO-EARN': '阅读任务', 'DAILY-CHECK-IN': '每日签到',
+    'CLAIM-BONUS-POINTS': '领取奖励', 'VISUAL-SEARCH': '视觉搜索',
+    'PUNCH-CARDS': '打卡活动',
+};
 
 function observe(eventsDir, accounts) {
     if (!eventsDir) return;
@@ -26,20 +34,24 @@ function observe(eventsDir, accounts) {
 
     const baseLog = Logger.prototype.baseLog;
     const active = new WeakMap();
+    const previousPhase = new WeakMap();
     Logger.prototype.baseLog = function (level, platform, tag, message, color) {
         const text = typeof message === 'string' ? message : '';
         if (tag === 'ACCOUNT-START') {
             const email = /^开始处理账户:\s*([^\s|]+)/.exec(text)?.[1];
             if (email) {
                 active.set(this, email);
+                previousPhase.delete(this);
                 emit({type: 'started', email});
             }
         } else if (tag === 'ACCOUNT-END' || tag === 'ACCOUNT-SKIP' || tag === 'ACCOUNT-ERROR' || tag === 'ACCOUNT-PARTIAL') {
             const email = /^(?:(?:账户完成|跳过账户):\s*|账户中断但已获得部分积分\s*\|\s*)?([^\s|]+@[^\s|]+)/.exec(text)?.[1];
             if (email) {
                 const points = /\| 获得积分=(-?\d+)/.exec(text);
+                const balance = /\| 现余额=(\d+)/.exec(text);
                 const type = {'ACCOUNT-END': 'success', 'ACCOUNT-SKIP': 'skipped', 'ACCOUNT-ERROR': 'failed', 'ACCOUNT-PARTIAL': 'partial'}[tag];
-                emit({type, email, points: points ? Number(points[1]) : type === 'skipped' ? 0 : null});
+                emit({type, email, points: points ? Number(points[1]) : type === 'skipped' ? 0 : null,
+                    balance: balance ? Number(balance[1]) : null});
                 if (type === 'failed' && LOGIN_REQUIRED.test(text)) emit({type: 'login', email});
             }
         } else if (tag === 'FLOW' && level === 'error') {
@@ -56,6 +68,11 @@ function observe(eventsDir, accounts) {
             if (email) emit({type: 'login', email});
         } else if (cluster.isPrimary && (tag === 'RUN-END' || tag === 'RUN-SKIP')) {
             emit({type: tag === 'RUN-SKIP' ? 'run_skipped' : 'run_ended', failed: text.includes('存在失败')});
+        }
+        const phase = PHASES[tag];
+        if (active.has(this) && typeof phase === 'string' && phase !== previousPhase.get(this)) {
+            previousPhase.set(this, phase);
+            emit({type: 'phase', email: active.get(this), phase});
         }
         return baseLog.call(this, level, platform, tag, message, color);
     };

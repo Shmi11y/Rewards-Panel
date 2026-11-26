@@ -32,6 +32,7 @@ import run_history
 DATA = Path(os.environ.get("REWARDS_DATA_DIR") or ROOT / "data").resolve()
 SCHED = DATA / "schedule.json"
 PIDFILE = DATA / "scheduler.pid"
+SUPERVISOR_PIDFILE = DATA / "scheduler-supervisor.pid"
 SCHEDULER = ROOT / "scheduler.py"
 TASK = ROOT / "Run-Task.bat"
 
@@ -101,6 +102,9 @@ def load(*, now: float | None = None) -> dict:
             pass
     times = [t for t in (_norm_time(x) for x in data.get("times") or []) if t]
     data["times"] = sorted(set(times))[:MAX_TIMES] or list(DEFAULTS["times"])
+    groups = data.get("groups")
+    data["groups"] = {slot: group for slot, group in groups.items()
+                      if slot in data["times"] and valid_group(group)} if isinstance(groups, dict) else {}
     if not isinstance(data.get("done"), dict):
         data["done"] = {}
     if type(data.get("activeAfter")) not in (int, float) or not 0 <= data["activeAfter"] < float("inf"):
@@ -209,6 +213,15 @@ def ensure_daemon() -> bool:
     return False
 
 
+def supervise_if_missing() -> None:
+    try:
+        supervisor = int(SUPERVISOR_PIDFILE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        supervisor = 0
+    if load()["mode"] == "daily" and not _pid_alive(supervisor):
+        ensure_daemon()
+
+
 def stop_daemon() -> bool:
     pid = daemon_pid()
     if not _pid_alive(pid):
@@ -250,6 +263,7 @@ def status() -> dict:
     st.update({
         "mode": data.get("mode", "manual"),
         "times": data.get("times", []),
+        "groups": data["groups"],
         "time": (data.get("times") or ["09:10"])[0],
         "doneToday": done,
         "retry": data.get("retry", 0),
@@ -270,11 +284,16 @@ def status() -> dict:
     return st
 
 
-def update(mode: str, times=None, retry=None, weekdays_only=None, catch_up_mode=None, catch_up_minutes=None) -> dict:
+def valid_group(group) -> bool:
+    return isinstance(group, str) and 0 < len(group) <= 32 and group == group.strip() and group.isprintable()
+
+
+def update(mode: str, times=None, retry=None, weekdays_only=None, catch_up_mode=None, catch_up_minutes=None,
+           groups=None) -> dict:
     if mode not in ("manual", "daily", "boot"):
         return {"ok": False, "msg": "模式不合法"}
     data = load()
-    previous_plan = (data["mode"], data["times"], data["weekdaysOnly"])
+    previous_plan = (data["mode"], data["times"], data["weekdaysOnly"], data["groups"])
     if times is not None:
         if isinstance(times, str):
             times = [times]
@@ -284,6 +303,13 @@ def update(mode: str, times=None, retry=None, weekdays_only=None, catch_up_mode=
         if len(clean) > MAX_TIMES:
             return {"ok": False, "msg": f"最多 {MAX_TIMES} 个时间点"}
         data["times"] = sorted(set(clean))
+    if groups is not None:
+        if not isinstance(groups, dict) or any(slot not in data["times"] or not valid_group(group)
+                                               for slot, group in groups.items()):
+            return {"ok": False, "msg": "定时分组不合法"}
+        data["groups"] = groups
+    else:
+        data["groups"] = {slot: group for slot, group in data["groups"].items() if slot in data["times"]}
     if retry is not None:
         data["retry"] = max(0, min(2, int(retry)))
     if weekdays_only is not None:
@@ -300,7 +326,7 @@ def update(mode: str, times=None, retry=None, weekdays_only=None, catch_up_mode=
     if mode != previous_plan[0]:
         data["paused"] = False
         data.pop("pausedUntil", None)
-    if (mode, data["times"], data["weekdaysOnly"]) != previous_plan:
+    if (mode, data["times"], data["weekdaysOnly"], data["groups"]) != previous_plan:
         data["activeAfter"] = time.time()
     save(data)
 

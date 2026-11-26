@@ -51,6 +51,7 @@ SOURCE_ROOT = str(Path(__file__).resolve().parent.parent)
 if SOURCE_ROOT not in sys.path:
     sys.path.insert(0, SOURCE_ROOT)
 import accounts as acct
+import balance
 import schedule as sched_mod
 import run_history
 import diagnostics
@@ -130,7 +131,7 @@ BACKUP_FORMAT = 1
 BACKUP_MAX_BYTES = 64 * 1024
 SCHEDULE_BACKUP_KEYS = ("mode", "times", "retry", "weekdaysOnly", "catchUpMode",
                         "catchUpMinutes", "paused", "bootDelay")
-UPDATE_DOWNLOADS = updates.UpdateDownloads(ROOT / "updates")
+UPDATE_DOWNLOADS = updates.UpdateDownloads(ROOT / "updates", ROOT)
 _DURATION = re.compile(
     r"([0-9]+(?:\.[0-9]+)?|\.[0-9]+) *(milliseconds?|msecs?|ms|seconds?|secs?|s|"
     r"minutes?|mins?|m|hours?|hrs?|h|days?|d|weeks?|w|years?|yrs?|y)?", re.IGNORECASE)
@@ -141,19 +142,7 @@ _DURATION_LIMIT = 2_147_483_647
 
 def prune_old_logs(keep_days: int = 30) -> dict:
     """删除 app/logs 下超过保留期的日志，并给调度日志封顶"""
-    import time as _t
-    removed, freed = 0, 0
-    cutoff = _t.time() - keep_days * 86400
-    logdir = HOME / "logs"
-    if logdir.exists():
-        for f in logdir.glob("*.log"):
-            try:
-                if f.stat().st_mtime < cutoff:
-                    freed += f.stat().st_size
-                    f.unlink()
-                    removed += 1
-            except Exception:
-                pass
+    result = run_history.maintain_daily_logs(LOG_DIR, keep_days) if run_state() is None else {"removed": 0, "freed": 0, "compressed": 0}
     sl = ROOT / "logs" / "scheduler.log"
     try:
         if sl.exists() and sl.stat().st_size > 2 * 1024 * 1024:
@@ -161,7 +150,7 @@ def prune_old_logs(keep_days: int = 30) -> dict:
             sl.write_text("\n".join(lines) + "\n", encoding="utf-8")
     except Exception:
         pass
-    return {"removed": removed, "freed": freed}
+    return result
 
 
 def cache_size() -> int:
@@ -378,7 +367,7 @@ def _validate_backup(body: dict) -> None:
     _validate_delay_ranges(tasks)
 
     if (not isinstance(plan, dict) or not set(SCHEDULE_BACKUP_KEYS) <= set(plan)
-            or set(plan).difference(SCHEDULE_BACKUP_KEYS, ("pausedUntil",))
+            or set(plan).difference(SCHEDULE_BACKUP_KEYS, ("pausedUntil", "groups"))
             or plan["mode"] not in ("manual", "daily", "boot")
             or not isinstance(plan["times"], list) or not 1 <= len(plan["times"]) <= sched_mod.MAX_TIMES
             or any(not isinstance(slot, str) or not re.fullmatch(r"(?:[01][0-9]|2[0-3]):[0-5][0-9]", slot)
@@ -393,6 +382,10 @@ def _validate_backup(body: dict) -> None:
             or ("pausedUntil" in plan and (not plan["paused"] or plan["mode"] == "manual"
                                            or not run_history.valid_pause_deadline(plan["pausedUntil"])))):
         raise ValueError("定时计划格式或取值不合法")
+    groups = plan.get("groups", {})
+    if not isinstance(groups, dict) or any(slot not in plan["times"] or not sched_mod.valid_group(group)
+                                           for slot, group in groups.items()):
+        raise ValueError("定时分组格式不合法")
     if (not isinstance(prefs, dict) or set(prefs) != set(PREFS_DEFAULT)
             or prefs["theme"] not in ("light", "dark")
             or any(type(prefs[key]) is not bool for key in ("onlyActive", "keepInTray"))):
@@ -413,6 +406,8 @@ def export_settings() -> dict:
         }
         if "pausedUntil" in schedule:
             backup["schedule"]["pausedUntil"] = schedule["pausedUntil"]
+        if schedule["groups"]:
+            backup["schedule"]["groups"] = schedule["groups"]
         try:
             _validate_backup(backup)
         except ValueError as exc:
@@ -437,7 +432,9 @@ def import_settings(backup: dict) -> dict:
             previous_plan = {key: plan[key] for key in SCHEDULE_BACKUP_KEYS}
             if "pausedUntil" in plan:
                 previous_plan["pausedUntil"] = plan["pausedUntil"]
-            imported_plan = {**backup["schedule"], "times": sorted(backup["schedule"]["times"])}
+            previous_plan["groups"] = plan["groups"]
+            imported_plan = {**backup["schedule"], "times": sorted(backup["schedule"]["times"]),
+                             "groups": backup["schedule"].get("groups", {})}
             plan_changed = imported_plan != previous_plan
 
             if backup["tasks"]:
@@ -629,6 +626,35 @@ _local_open = None
 _window_run_lock = threading.Lock()
 _window_run: int | None = None
 _stop_mark: float = 0.0   # 上次手动停止时日志的 mtime，用来压掉"刚跑完仍显示运行中"
+_balance_lock = threading.Lock()
+_balance_jobs: dict[str, dict] = {}
+
+
+def start_balance_sync() -> dict:
+    accounts = acct.load()
+    email = accounts.get("active")
+    if not email:
+        return {"ok": False, "msg": "请先选择账号"}
+    with _balance_lock:
+        if any(job["state"] == "syncing" for job in _balance_jobs.values()):
+            return {"ok": False, "msg": "已有余额同步正在进行"}
+        _balance_jobs[email] = {"state": "syncing"}
+
+    def worker() -> None:
+        try:
+            points = balance.read(SESSION_DB, email)
+            now = time.time()
+            balance.save(DATA_DIR, email, points, now, "online")
+            result = {"state": "ready", "balance": points, "at": now}
+        except ValueError as error:
+            result = {"state": "failed", "message": str(error) if type(error) is ValueError else "无法读取登录会话"}
+        except (OSError, sqlite3.Error, TypeError, AttributeError):
+            result = {"state": "failed", "message": "无法读取登录会话，请重试"}
+        with _balance_lock:
+            _balance_jobs[email] = result
+
+    threading.Thread(target=worker, daemon=True).start()
+    return {"ok": True}
 
 
 def queue_window_run(run_id: int) -> None:
@@ -846,14 +872,18 @@ def _slim_log() -> dict:
 
 def _latest_logged_balance() -> int | None:
     """从当前日志和最近运行日志中找最后一个已记录的余额。"""
-    paths = list(LOG_DIR.glob("*.log"))
+    paths = list(LOG_DIR.glob("*.log")) + list(LOG_DIR.glob("*.log.gz"))
     run_logs = DATA_DIR / "run-logs"
     if run_logs.exists():
         paths.extend(run_logs.glob("*.log"))
     for path in sorted(paths, key=lambda item: item.stat().st_mtime, reverse=True):
         try:
-            lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
-        except OSError:
+            if path.suffix == ".gz":
+                with run_history.open_daily_log(path.with_suffix("")) as stream:
+                    lines = stream.read().splitlines()
+            else:
+                lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
+        except (OSError, EOFError):
             continue
         for line in reversed(lines):
             match = RE_BALANCE.search(line)
@@ -864,10 +894,27 @@ def _latest_logged_balance() -> int | None:
 
 def build_status() -> dict:
     state = run_state()
+    schedule = sched_mod.status()
     try:
         latest = run_history.read(DATA_DIR, latest=True)
+        history = run_history.read(DATA_DIR)
     except sqlite3.Error:
-        latest = []
+        latest = history = []
+    active_run = next((run for run in history if run["status"] == "running"), None)
+    accounts = acct.summary()
+    failures = {}
+    for run in history:
+        for row in run["accounts"]:
+            if row["status"] in {"failed", "needs_login"}:
+                failures.setdefault(row["email"].casefold(), run["finishedAt"])
+    for row in accounts["items"]:
+        row["lastFailure"] = failures.get(row["email"].casefold())
+    with _balance_lock:
+        synced = dict(_balance_jobs.get(accounts.get("active"), {}))
+    try:
+        notices = run_history.read_notifications(DATA_DIR)
+    except (OSError, sqlite3.Error):
+        notices = {"unread": 0, "muted": []}
     return {
         "running": state is not None,
         "runningBy": state,
@@ -877,11 +924,15 @@ def build_status() -> dict:
         "log": _slim_log(),
         "session": session_info(),
         "env": env_summary(),
-        "accounts": acct.summary(),
-        "schedule": sched_mod.status(),
+        "accounts": accounts,
+        "schedule": schedule,
         "ui": dict(_ui_state),
         "cacheBytes": cache_size(),
-        "latestRun": latest[0] if latest else None,
+        "latestRun": active_run or (latest[0] if latest else None),
+        "progress": run_history.progress(DATA_DIR, active_run, history) if active_run else None,
+        "balanceSync": synced,
+        "noticeCount": notices["unread"],
+        "noticeMuted": notices["muted"],
         "app": {
             "home": str(HOME),
             "root": str(ROOT),
@@ -892,7 +943,7 @@ def build_status() -> dict:
     }
 
 
-def start_run(only: str | None = None, *, retry_account: bool = False) -> dict:
+def start_run(only: str | list[str] | None = None, *, retry_account: bool = False) -> dict:
     global _proc
     with _lock:
         if _proc is not None and _proc.poll() is None:
@@ -905,13 +956,16 @@ def start_run(only: str | None = None, *, retry_account: bool = False) -> dict:
         env["REWARDS_DATA_DIR"] = str(DATA_DIR)
         if only:
             try:
-                target_env = acct.child_env_for(only)
+                emails = [only] if isinstance(only, str) else only
+                target_env = acct.child_env_for_accounts(emails)
             except OSError:
                 return {"ok": False, "msg": "无法读取账号配置"}
             if target_env is None:
                 return {"ok": False, "msg": "此账号已移除或停用"}
             env.update(target_env)
-            env["REWARDS_ONLY_ACCOUNT"] = target_env["ACCOUNT_1_EMAIL"]
+            env["REWARDS_SELECTED_ACCOUNTS"] = json.dumps([
+                target_env[f"ACCOUNT_{slot}_EMAIL"].lower() for slot in range(1, len(emails) + 1)
+            ], ensure_ascii=False)
             if retry_account:
                 env["REWARDS_RETRY_ACCOUNT"] = "1"
         else:
@@ -940,6 +994,13 @@ def run_account_action(run_id: str, action: str, body) -> dict:
     run = run_record(run_id)
     if not run:
         return {"ok": False, "msg": "找不到该运行记录"}
+    if action == "retry-all":
+        emails = [row["email"] for row in run["accounts"] if row["status"] == "failed"]
+        if run["status"] == "running" or not emails:
+            return {"ok": False, "msg": "本次运行没有可重试的失败账号"}
+        enabled = {row["email"].casefold() for row in acct.load()["accounts"] if row.get("enabled", True)}
+        targets = [email for email in emails if email.casefold() in enabled]
+        return start_run(targets, retry_account=True) if targets else {"ok": False, "msg": "失败账号已移除或停用"}
     expected = "needs_login" if action == "login" else "failed"
     if run["status"] == "running" or not any(
         row["email"] == email and row["status"] == expected for row in run["accounts"]
@@ -1044,6 +1105,10 @@ class Handler(BaseHTTPRequestHandler):
         if self.path in ("/api/update/check", "/api/update/status", "/api/settings/backup"):
             if self.path == "/api/update/check":
                 result = UPDATE_DOWNLOADS.check(portable_version())
+                if result.get("updateAvailable"):
+                    run_history.record_notice(DATA_DIR, "update", "发现新版本",
+                                              f"Rewards Panel v{result['latest']} 可下载",
+                                              event=f"update:{result['latest']}")
             elif self.path == "/api/update/status":
                 result = UPDATE_DOWNLOADS.status()
             else:
@@ -1060,6 +1125,14 @@ class Handler(BaseHTTPRequestHandler):
             return
         if self.path == "/api/runs":
             self._send(200, json.dumps({"runs": run_history.read(DATA_DIR)}, ensure_ascii=False).encode("utf-8"),
+                       "application/json; charset=utf-8")
+            return
+        if self.path == "/api/update/rollback":
+            self._send(200, json.dumps(updates.rollback_status(ROOT), ensure_ascii=False).encode("utf-8"),
+                       "application/json; charset=utf-8")
+            return
+        if self.path == "/api/notifications":
+            self._send(200, json.dumps(run_history.read_notifications(DATA_DIR), ensure_ascii=False).encode("utf-8"),
                        "application/json; charset=utf-8")
             return
         if match := re.fullmatch(r"/api/runs/([^/]+)/log", self.path):
@@ -1175,7 +1248,7 @@ class Handler(BaseHTTPRequestHandler):
                 result = {"ok": True}
             except OSError:
                 result = {"ok": False, "msg": "无法打开兑换页，请稍后重试。"}
-        elif match := re.fullmatch(r"/api/runs/([^/]+)/(login|retry)", self.path):
+        elif match := re.fullmatch(r"/api/runs/([^/]+)/(login|retry|retry-all)", self.path):
             result = run_account_action(match[1], match[2], body)
         elif self.path == "/api/run":
             only = body.get("only") if isinstance(body, dict) else False
@@ -1230,6 +1303,10 @@ class Handler(BaseHTTPRequestHandler):
                 result = clean_cache()
             except BaseException as exc:  # noqa: BLE001
                 result = {"ok": False, "msg": f"清理失败: {exc}"}
+        elif match := re.fullmatch(r"/api/notifications/(read|clear|preferences)", self.path):
+            result = run_history.change_notifications(DATA_DIR, match[1], body.get("muted"))
+        elif self.path == "/api/balance/sync":
+            result = start_balance_sync()
         elif self.path == "/api/logs/prune":
             result = prune_old_logs()
         elif self.path == "/api/prefs":
@@ -1255,7 +1332,8 @@ class Handler(BaseHTTPRequestHandler):
                                           body.get("retry"),
                                           body.get("weekdaysOnly"),
                                           body.get("catchUpMode"),
-                                          body.get("catchUpMinutes"))
+                                          body.get("catchUpMinutes"),
+                                          body.get("groups"))
         else:
             self._send(404, b"not found", "text/plain")
             return
@@ -1276,6 +1354,16 @@ def seed_config() -> None:
         pass
 
 
+def _schedule_monitor() -> None:
+    while True:
+        try:
+            with _schedule_lock:
+                sched_mod.supervise_if_missing()
+        except OSError:
+            pass
+        time.sleep(30)
+
+
 def main() -> None:
     seed_config()
     try:
@@ -1286,6 +1374,8 @@ def main() -> None:
         purge_old_profiles()
     except Exception:
         pass
+    updates.record_upgrade(ROOT, portable_version())
+    threading.Thread(target=_schedule_monitor, daemon=True).start()
     print(f"Rewards 面板: http://127.0.0.1:{PORT}")
     print(f"应用根: {ROOT}")
     print(f"数据目录: {DATA_DIR}")
