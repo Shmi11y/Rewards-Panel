@@ -311,8 +311,13 @@ def set_paused(paused: bool) -> dict:
     data = load()
     if data["mode"] not in ("daily", "boot"):
         return {"ok": False, "msg": "尚未启用自动运行"}
-    if not paused and data["mode"] == "daily" and not ensure_daemon():
-        return {"ok": False, "msg": "定时守护未能启动"}
+    if not paused and data["mode"] == "daily":
+        try:
+            running = ensure_daemon()
+        except OSError:
+            running = False
+        if not running:
+            return {"ok": False, "msg": "定时守护未能启动，请重试"}
     if paused != data["paused"]:
         data["paused"] = paused
         if not paused:

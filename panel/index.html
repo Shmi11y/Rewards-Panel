@@ -81,6 +81,15 @@
   @media(max-width:1100px){.hero{grid-template-columns:1fr 1fr}.hero>div{border-top:1px solid var(--line)}}
   .recent-run{width:100%;display:flex;align-items:center;gap:16px;text-align:left;margin-bottom:18px;padding:14px 22px}
   .recent-run .run-meta{flex:1;min-width:0;color:var(--muted);font-size:13px}
+  .home-schedule{display:flex;align-items:center;flex-wrap:wrap;gap:8px 16px;margin-bottom:18px;padding:12px 22px}
+  .home-schedule [hidden]{display:none}
+  .home-schedule-next{display:flex;align-items:baseline;flex-wrap:wrap;gap:8px;margin-right:auto}
+  .home-schedule-next b{font-size:13px;font-variant-numeric:tabular-nums}
+  .update-details{margin-top:12px;overflow-wrap:anywhere}
+  .update-details p{margin:6px 0}
+  .update-details progress:not([hidden]){display:block;width:100%;height:12px;accent-color:var(--accent)}
+  .update-notes{max-height:174px;overflow:auto;white-space:pre-wrap;padding:8px 10px;background:var(--soft);border-radius:8px}
+  .update-guide{padding-left:1.4em}
   .run-status{font-size:12px;font-weight:600;color:var(--muted);white-space:nowrap}
   .run-status.success{color:var(--green)}
   .run-status.failed,.run-status.interrupted{color:var(--red)}
@@ -99,6 +108,7 @@
   .run-entry-body td:last-child{white-space:nowrap}
   .run-entry-actions{margin:10px 0 6px}
   .run-log{height:auto;max-height:57vh;margin-bottom:0}
+  #diagnosticsText{height:auto;max-height:min(490px,calc(85vh - 165px))}
   .qrow{display:flex;justify-content:space-between;font-size:13px;padding:9px 0;border-bottom:1px solid var(--line)}
   .qrow:last-child{border:none}
   .qrow b{font-variant-numeric:tabular-nums}
@@ -357,6 +367,13 @@
           <span class="run-status" id="recentRunStatus"></span>
           <span class="k">查看记录 ›</span>
         </button>
+        <div class="card home-schedule" aria-label="自动运行">
+          <strong>自动运行</strong>
+          <span class="run-status" id="homeScheduleState" role="status">读取中…</span>
+          <span class="home-schedule-next"><span class="k" id="homeScheduleNextLabel">下次运行</span><b id="homeScheduleNext">—</b></span>
+          <span class="run-status failed" id="homeScheduleWarning" role="status" hidden>定时守护未运行</span>
+          <button class="ghost sm" id="homeScheduleResume" hidden>恢复定时</button>
+        </div>
         <div class="card" style="margin-bottom:18px">
           <div class="ph" style="margin-bottom:6px"><h2 style="margin:0">积分曲线</h2><span class="sub" id="phaseText" style="margin:0"></span></div>
           <svg class="spark" id="spark" viewBox="0 0 600 120" preserveAspectRatio="none"></svg>
@@ -457,9 +474,27 @@
             <div class="kv" id="aboutBox"></div>
             <div class="inline" style="margin-top:14px">
               <button class="ghost" id="checkUpdate">检查更新</button>
-              <a href="https://github.com/Shmi11y/rewards-panel/releases/latest" target="_blank" rel="noopener noreferrer">打开 GitHub 发布页</a>
+              <a href="https://github.com/Shmi11y/Rewards-Panel/releases/latest" target="_blank" rel="noopener noreferrer">打开 GitHub 发布页</a>
             </div>
             <div class="sub" id="updateStatus" role="status" style="margin-top:8px"></div>
+            <div class="update-details" id="updateRelease" hidden>
+              <p><strong>更新摘要</strong></p>
+              <div class="sub update-notes" id="updateNotes" tabindex="0"></div>
+              <p><button class="ghost" id="downloadUpdate" hidden>下载新版 ZIP</button></p>
+            </div>
+            <div class="update-details" id="updateTransfer" hidden>
+              <p class="sub" id="updateTransferStatus" role="status"></p>
+              <progress id="updateProgress" max="100" aria-label="更新包下载进度"></progress>
+              <div id="updateGuide" hidden>
+                <p class="sub" id="updateArchivePath"></p>
+                <button class="ghost" id="openUpdateFolder">打开下载目录</button>
+                <ol class="sub update-guide">
+                  <li>结束正在运行的任务并退出程序。若面板留在托盘，请从托盘菜单选择「退出程序」。</li>
+                  <li>解压 ZIP，将其中 RewardsPanel 文件夹的内容覆盖到原程序目录，保留 <b>data/</b>。</li>
+                  <li>双击原目录的 Rewards.exe。启用每天定时的用户可重新登录 Windows，让守护进程加载新版。</li>
+                </ol>
+              </div>
+            </div>
             <div class="sub" style="margin-top:14px;line-height:1.9">
               凭据只存在本机 <b>data\.env</b> 与 <b>data\accounts.json</b>，不上传任何服务器。<br>
               登录态存在 <b>data\sessions\sessions.db</b>，按账号 + 平台分开保存。
@@ -474,6 +509,11 @@
               <input id="settingsBackupFile" type="file" accept=".json,application/json" hidden>
             </div>
             <div class="sub" id="backupStatus" role="status" style="margin-top:8px"></div>
+          </div>
+          <div class="card">
+            <h2>脱敏诊断报告</h2>
+            <p class="sub">包含版本、启动日志节选和最近一次失败摘要，可用于反馈问题。</p>
+            <button class="ghost" id="previewDiagnostics">预览诊断报告</button>
           </div>
         </div>
       </section>
@@ -666,6 +706,18 @@
   <p class="sub" id="runLogFeedback" role="status"></p>
   <pre class="logbox run-log" id="runLogText" tabindex="0" aria-label="本次运行的日志" hidden></pre>
 </dialog>
+<dialog class="run-dialog" id="diagnosticsDialog" aria-labelledby="diagnosticsTitle">
+  <div class="run-dialog-head">
+    <h2 id="diagnosticsTitle">脱敏诊断报告</h2>
+    <form method="dialog"><button class="ghost sm" autofocus>关闭</button></form>
+  </div>
+  <p class="sub">保存前可核对下方内容。报告保存在本地，可手动附到 GitHub Issue。</p>
+  <p class="sub" id="diagnosticsStatus" role="status"></p>
+  <pre class="logbox run-log" id="diagnosticsText" tabindex="0" aria-label="诊断报告正文" hidden></pre>
+  <div class="inline" style="margin-top:12px">
+    <button class="primary" id="saveDiagnostics" disabled>保存诊断报告</button>
+  </div>
+</dialog>
 <div id="toast"></div>
 
 <script>
@@ -718,6 +770,21 @@ const PACE = {
 };
 let STATUS=null, CONFIG=null, DRAFT=null, BUSY=false, PAGE='home', SCH_DIRTY=false, SCH_MODE='manual';
 let SCH_TIMES=['09:10'], LOGS=[], DETAIL=null, PREFS={theme:'light',onlyActive:false,keepInTray:false}, LAST_DETAIL=0;
+let SCHEDULE_RESUMING=false;
+
+function renderHomeSchedule(schedule){
+  if(!schedule) return;
+  const daily=schedule.mode==='daily', boot=schedule.mode==='boot';
+  const paused=(daily || boot) && schedule.paused;
+  const daemonMissing=daily && !schedule.daemonAlive;
+  const state=paused?'已暂停':daily?'每天定时':boot?'开机运行':'未启用';
+  if($('homeScheduleState').textContent!==state) $('homeScheduleState').textContent=state;
+  $('homeScheduleState').classList.toggle('needs_login',paused);
+  $('homeScheduleNextLabel').textContent=daemonMissing && !paused ? '下次计划' : '下次运行';
+  $('homeScheduleNext').textContent=paused?'—':schedule.nextRun||'—';
+  $('homeScheduleWarning').hidden=!daemonMissing;
+  $('homeScheduleResume').hidden=!paused && !daemonMissing;
+}
 
 function renderSchedule(sc){
   if(!sc) return;
@@ -817,7 +884,10 @@ function nav(page){
   if(page==='settings') loadConfig();
   if(page==='logs') loadLogs();
   if(page==='detail') loadDetail();
-  if(page==='about') loadSelf();
+  if(page==='about'){
+    loadSelf();
+    if(updateTransfer.state==='idle') refreshUpdateTransfer();
+  }
 }
 
 function spark(points){
@@ -1003,6 +1073,7 @@ $('recentRunButton').onclick=()=>{
 function renderHome(d){
   const log=d.log, acc=d.accounts;
   renderRecentRun(d.latestRun);
+  renderHomeSchedule(d.schedule);
   countUp($('sBalance'), log.balance, '');
   $('sBalanceSub').textContent = log.startBalance!=null ? '今日起点 '+fmt(log.startBalance) : '尚未开始';
   if(log.gained) countUp($('sGained'), log.gained, '+'); else { $('sGained').textContent='—'; $('sGained').dataset.v='0'; }
@@ -1260,14 +1331,81 @@ async function loadSelf(){
   }catch(e){}
 }
 
+let updateOffer=null, updateTransfer={state:'idle'}, updateStarting=false, updateTimer=null, updatePollRequest=0;
+
+function renderUpdateTransfer(){
+  const active=['downloading','verifying'].includes(updateTransfer.state);
+  const ready=updateTransfer.state==='ready';
+  const failed=updateTransfer.state==='failed';
+  const sameVersion=updateOffer?.tag===updateTransfer.tag;
+  const button=$('downloadUpdate');
+  button.hidden=!updateOffer?.canDownload || (ready && sameVersion);
+  button.disabled=active || updateStarting;
+  button.textContent=failed && sameVersion?'重试下载':'下载新版 ZIP';
+  $('updateTransfer').hidden=updateTransfer.state==='idle';
+  $('updateGuide').hidden=!ready;
+  const progress=$('updateProgress');
+  progress.hidden=!active;
+  const status=$('updateTransferStatus');
+  if(updateTransfer.state==='downloading'){
+    const {received,total}=updateTransfer;
+    if(total){
+      const percent=Math.min(100,Math.floor(received*100/total));
+      progress.value=percent;
+      status.textContent=`正在下载 ${updateTransfer.tag} · ${percent}%`;
+    }else{
+      progress.removeAttribute('value');
+      status.textContent=`正在下载 ${updateTransfer.tag} · 已下载 ${(received/1048576).toFixed(1)} MiB`;
+    }
+  }else if(updateTransfer.state==='verifying'){
+    progress.removeAttribute('value');
+    status.textContent='正在校验 ZIP 的 SHA-256…';
+  }else if(ready){
+    status.textContent=`${updateTransfer.tag} 已下载，SHA-256 校验通过。`;
+    $('updateArchivePath').textContent=updateTransfer.path;
+  }else if(failed){
+    status.textContent=updateTransfer.msg || '下载失败，请重试。';
+  }
+}
+
+async function refreshUpdateTransfer(){
+  const request=++updatePollRequest;
+  clearTimeout(updateTimer);
+  let state;
+  try{
+    const response=await fetch('/api/update/status',{cache:'no-store'});
+    if(!response.ok) throw new Error('无法读取更新进度');
+    state=await response.json();
+  }catch(error){
+    if(request===updatePollRequest) $('updateTransferStatus').textContent='暂时无法读取更新进度，正在重试…';
+  }
+  if(request!==updatePollRequest) return;
+  if(state){
+    updateTransfer=state;
+    renderUpdateTransfer();
+  }
+  if(['downloading','verifying'].includes(updateTransfer.state)){
+    updateTimer=setTimeout(refreshUpdateTransfer,500);
+  }
+}
+
 $('checkUpdate').onclick=async()=>{
   const button=$('checkUpdate'), status=$('updateStatus');
   button.disabled=true;
+  updateOffer=null;
+  $('updateRelease').hidden=true;
   status.textContent='正在检查 GitHub 上的版本…';
   try{
     const result=await (await fetch('/api/update/check',{cache:'no-store'})).json();
     if(!result.ok) status.textContent=result.msg || '检查更新失败，请重试。';
-    else if(result.updateAvailable) status.textContent=`发现新版 v${result.latest}，可前往 GitHub 发布页下载。`;
+    else if(result.updateAvailable){
+      updateOffer=result;
+      status.textContent=result.canDownload?`发现新版 v${result.latest}。`:
+        `发现新版 v${result.latest}，暂时无法自动校验，请打开 GitHub 发布页查看。`;
+      $('updateNotes').textContent=result.notes || '暂无摘要，可在 GitHub 发布页查看。';
+      $('updateRelease').hidden=false;
+      renderUpdateTransfer();
+    }
     else status.textContent=`暂无更新。GitHub 最新正式版为 v${result.latest}。`;
   }catch(e){
     status.textContent='检查更新失败，请重试。';
@@ -1276,10 +1414,82 @@ $('checkUpdate').onclick=async()=>{
   }
 };
 
+$('downloadUpdate').onclick=async()=>{
+  if(updateStarting || !updateOffer?.canDownload) return;
+  const tag=updateOffer.tag;
+  updateStarting=true;
+  renderUpdateTransfer();
+  try{
+    const result=await post('/api/update/download',{tag});
+    if(!result.ok){
+      toast(result.msg||'无法开始下载');
+      return;
+    }
+    updateTransfer={state:'downloading',tag,received:0};
+    renderUpdateTransfer();
+    await refreshUpdateTransfer();
+  }catch(error){
+    toast('无法开始下载，请重试');
+  }finally{
+    updateStarting=false;
+    renderUpdateTransfer();
+  }
+};
+
+$('openUpdateFolder').onclick=async()=>{
+  try{
+    const result=await post('/api/update/open-folder',{});
+    if(!result.ok) toast(result.msg||'无法打开下载目录');
+  }catch(error){
+    toast('无法打开下载目录，请按显示的路径查找更新包');
+  }
+};
+
 function setBackupBusy(busy){
   $('exportSettings').disabled=busy;
   $('importSettings').disabled=busy;
 }
+
+function downloadText(text, filename, type){
+  const url=URL.createObjectURL(new Blob([text],{type}));
+  const link=document.createElement('a');
+  link.href=url;
+  link.download=filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),60000);
+}
+
+let diagnosticsRequest=0;
+$('previewDiagnostics').onclick=async()=>{
+  const request=++diagnosticsRequest;
+  const dialog=$('diagnosticsDialog'), output=$('diagnosticsText'), status=$('diagnosticsStatus');
+  $('saveDiagnostics').disabled=true;
+  output.hidden=true;
+  output.textContent='';
+  status.textContent='正在生成报告…';
+  dialog.showModal();
+  try{
+    const response=await fetch('/api/diagnostics',{cache:'no-store'});
+    if(!response.ok) throw new Error('诊断报告读取失败');
+    const {report}=await response.json();
+    if(request!==diagnosticsRequest || !dialog.open) return;
+    if(typeof report!=='string' || !report) throw new Error('诊断报告为空');
+    output.textContent=report;
+    output.hidden=false;
+    output.scrollTop=0;
+    status.textContent='';
+    $('saveDiagnostics').disabled=false;
+  }catch(error){
+    if(request===diagnosticsRequest && dialog.open) status.textContent='无法生成报告，请关闭后重试。';
+  }
+};
+
+$('saveDiagnostics').onclick=()=>{
+  const report=$('diagnosticsText').textContent;
+  downloadText(report,'RewardsPanel-diagnostics.txt','text/plain;charset=utf-8');
+};
 
 $('exportSettings').onclick=async()=>{
   const status=$('backupStatus');
@@ -1288,15 +1498,7 @@ $('exportSettings').onclick=async()=>{
   try{
     const result=await (await fetch('/api/settings/backup',{cache:'no-store'})).json();
     if(!result.ok) throw new Error(result.msg || '无法读取设置');
-    const blob=new Blob([JSON.stringify(result.backup,null,2)+'\n'],{type:'application/json'});
-    const url=URL.createObjectURL(blob);
-    const link=document.createElement('a');
-    link.href=url;
-    link.download='RewardsPanel-settings.json';
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    setTimeout(()=>URL.revokeObjectURL(url),60000);
+    downloadText(JSON.stringify(result.backup,null,2)+'\n','RewardsPanel-settings.json','application/json');
     status.textContent='已生成 JSON 设置备份。';
   }catch(e){
     status.textContent='导出失败。'+e.message;
@@ -1732,12 +1934,36 @@ $('schSkip').onclick = async () => {
   toast(d.ok ? '今天不再自动运行' : (d.msg||'操作失败'));
   renderSchedule(d);
 };
-$('schResume').onclick = async () => {
-  const d=await post('/api/schedule/pause',{paused:false});
-  if(!d.ok) return toast(d.msg||'恢复失败');
-  renderSchedule(d);
-  toast('已恢复定时');
-};
+async function resumeSchedule(){
+  if(SCHEDULE_RESUMING) return;
+  SCHEDULE_RESUMING=true;
+  const buttons=[$('homeScheduleResume'),$('schResume')];
+  for(const button of buttons){
+    button.disabled=true;
+    button.textContent='恢复中…';
+  }
+  try{
+    const schedule=await post('/api/schedule/pause',{paused:false});
+    if(!schedule.ok){
+      toast(schedule.msg||'恢复定时失败');
+      return;
+    }
+    if(STATUS) STATUS.schedule=schedule;
+    renderHomeSchedule(schedule);
+    if(!SCH_DIRTY) renderSchedule(schedule);
+    toast('已恢复定时');
+  }catch(error){
+    toast('恢复定时失败，请重试');
+  }finally{
+    SCHEDULE_RESUMING=false;
+    for(const button of buttons){
+      button.disabled=false;
+      button.textContent='恢复定时';
+    }
+  }
+}
+$('homeScheduleResume').onclick=resumeSchedule;
+$('schResume').onclick=resumeSchedule;
 
 (async () => {
   try{

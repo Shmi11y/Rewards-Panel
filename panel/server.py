@@ -25,8 +25,6 @@ from datetime import datetime
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 from tempfile import NamedTemporaryFile
-from urllib.error import HTTPError
-from urllib.request import Request, urlopen
 
 ROOT = Path(os.environ.get("REWARDS_APP_ROOT") or Path(__file__).resolve().parent.parent)
 HOME = ROOT / "app"
@@ -55,6 +53,8 @@ if SOURCE_ROOT not in sys.path:
 import accounts as acct
 import schedule as sched_mod
 import run_history
+import diagnostics
+import updates
 
 SESSION_DB = DATA_DIR / "sessions" / "sessions.db"
 CONFIG_FILE = DATA_DIR / "config.json"
@@ -129,9 +129,7 @@ BACKUP_FORMAT = 1
 BACKUP_MAX_BYTES = 64 * 1024
 SCHEDULE_BACKUP_KEYS = ("mode", "times", "retry", "weekdaysOnly", "catchUpMode",
                         "catchUpMinutes", "paused", "bootDelay")
-RELEASE_API = "https://api.github.com/repos/Shmi11y/rewards-panel/releases/latest"
-RELEASE_PAGE = "https://github.com/Shmi11y/rewards-panel/releases"
-RELEASE_VERSION = re.compile(r"v?([0-9]{1,9})\.([0-9]{1,9})\.([0-9]{1,9})")
+UPDATE_DOWNLOADS = updates.UpdateDownloads(ROOT / "updates")
 _DURATION = re.compile(
     r"([0-9]+(?:\.[0-9]+)?|\.[0-9]+) *(milliseconds?|msecs?|ms|seconds?|secs?|s|"
     r"minutes?|mins?|m|hours?|hrs?|h|days?|d|weeks?|w|years?|yrs?|y)?", re.IGNORECASE)
@@ -600,50 +598,10 @@ def selftest() -> dict:
 def portable_version() -> str | None:
     try:
         version = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
-        match = RELEASE_VERSION.fullmatch(version)
+        match = updates.RELEASE_VERSION.fullmatch(version)
         return ".".join(match.groups()) if match else None
     except (OSError, UnicodeError):
         return None
-
-
-def check_update() -> dict:
-    current = portable_version()
-    if current is None:
-        return {"ok": False, "msg": "无法识别当前便携版版本"}
-    request = Request(RELEASE_API, headers={"Accept": "application/vnd.github+json", "User-Agent": "RewardsPanel"})
-    try:
-        with urlopen(request, timeout=8) as response:
-            release = json.loads(response.read(512 * 1024))
-        tag = release.get("tag_name") if isinstance(release, dict) else None
-    except HTTPError as exc:
-        if exc.code in (403, 429):
-            tag = _latest_public_tag()
-            if tag is None:
-                return {"ok": False, "msg": "GitHub 暂时限制更新查询，请稍后重试"}
-        elif exc.code == 404:
-            return {"ok": False, "msg": "GitHub 上未找到正式版本"}
-        else:
-            return {"ok": False, "msg": "GitHub 暂时无法提供版本信息"}
-    except OSError:
-        return {"ok": False, "msg": "暂时无法连接 GitHub，请检查网络后重试"}
-    except (ValueError, RecursionError):
-        return {"ok": False, "msg": "无法读取 GitHub 版本信息"}
-    latest = RELEASE_VERSION.fullmatch(tag) if isinstance(tag, str) else None
-    if latest is None:
-        return {"ok": False, "msg": "无法识别 GitHub 上的版本号"}
-    return {"ok": True, "current": current, "latest": ".".join(latest.groups()),
-            "updateAvailable": tuple(map(int, latest.groups())) > tuple(map(int, current.split(".")))}
-
-
-def _latest_public_tag() -> str | None:
-    request = Request(f"{RELEASE_PAGE}/latest", method="HEAD", headers={"User-Agent": "RewardsPanel"})
-    try:
-        with urlopen(request, timeout=5) as response:
-            url = response.geturl()
-    except OSError:
-        return None
-    prefix = f"{RELEASE_PAGE}/tag/"
-    return url.removeprefix(prefix) if url.startswith(prefix) else None
 
 
 def _app_version() -> str:
@@ -1030,8 +988,18 @@ class Handler(BaseHTTPRequestHandler):
                 pass
 
     def _route_get(self) -> None:
-        if self.path in ("/api/update/check", "/api/settings/backup"):
-            result = check_update() if self.path == "/api/update/check" else export_settings()
+        if self.path == "/api/diagnostics":
+            report = diagnostics.make_report(ROOT, DATA_DIR, portable_version(), _app_version())
+            self._send(200, json.dumps({"report": report}, ensure_ascii=False).encode("utf-8"),
+                       "application/json; charset=utf-8")
+            return
+        if self.path in ("/api/update/check", "/api/update/status", "/api/settings/backup"):
+            if self.path == "/api/update/check":
+                result = UPDATE_DOWNLOADS.check(portable_version())
+            elif self.path == "/api/update/status":
+                result = UPDATE_DOWNLOADS.status()
+            else:
+                result = export_settings()
             self._send(200, json.dumps(result, ensure_ascii=False).encode("utf-8"),
                        "application/json; charset=utf-8")
             return
@@ -1146,6 +1114,10 @@ class Handler(BaseHTTPRequestHandler):
 
         if self.path == "/api/settings/backup":
             result = import_settings(body)
+        elif self.path == "/api/update/download":
+            result = UPDATE_DOWNLOADS.start(body.get("tag") if isinstance(body, dict) else None)
+        elif self.path == "/api/update/open-folder":
+            result = UPDATE_DOWNLOADS.open_folder()
         elif match := re.fullmatch(r"/api/runs/([^/]+)/(login|retry)", self.path):
             result = run_account_action(match[1], match[2], body)
         elif self.path == "/api/run":
