@@ -65,7 +65,7 @@ def main():
     assert not api("/api/schedule", {"mode": "boot"})["ok"]
     assert api("/api/schedule", {"mode": "daily", "times": ["23:59"]})["daemonAlive"]
     assert api("/api/schedule/pause", {"paused": True})["paused"]
-    assert api("/api/settings/backup")["schedule"]["mode"] == "daily"
+    assert api("/api/settings/backup")["backup"]["schedule"]["mode"] == "daily"
 
 
 if __name__ == "__main__":
