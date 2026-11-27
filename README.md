@@ -4,7 +4,7 @@ Rewards 面板是基于开源项目 Microsoft-Rewards-Script 的可视化面板�
 
 ## 下载 Windows x64 轻量便携版
 
-**[下载 Rewards Panel v0.1.17 轻量便携包（约 76 MiB）](https://github.com/Shmi11y/Rewards-Panel/releases/download/v0.1.17/RewardsPanel-windows-x64-lite.zip)**
+**[下载 Rewards Panel v0.1.18 轻量便携包（约 76 MiB）](https://github.com/Shmi11y/Rewards-Panel/releases/download/v0.1.18/RewardsPanel-windows-x64-lite.zip)**
 
 1. 将 ZIP 完整解压到本机可写入的目录，打开 `RewardsPanel` 文件夹。
 2. 双击带项目图标的 **`Rewards.exe`**。
@@ -14,13 +14,17 @@ Rewards 面板是基于开源项目 Microsoft-Rewards-Script 的可视化面板�
 
 Python 和 Node.js 已随包提供。面板打开后，在「账号 → 添加账号」完成首次登录。也可以直接从总览打开微软 Rewards，自行完成活动。
 
+## 浏览器辅助模式
+
+参与模式选择「浏览器辅助」后，首页按钮会打开微软 Rewards。任务由用户在浏览器中手动点击，面板负责余额同步、账号状态、任务提醒、通知和运行记录。该模式不会启动自动任务引擎。
+
 ## Linux 与 Docker
 
 Linux 和 Docker 版提供总览、账号管理、余额同步、手动任务、每日定时、补跑与暂停、运行记录、面板内通知和设置备份。每日定时在面板服务运行时生效。Windows 托盘、系统通知、开机启动项和 EXE 一键更新属于桌面版功能。
 
 ### Linux
 
-1. 下载并解压 [启动与安装包](https://github.com/Shmi11y/Rewards-Panel/releases/download/v0.1.17/RewardsPanel-linux-x64.tar.gz)。需要 Git、Python 3.10+、Node.js 24+ 和 npm，推荐在 Ubuntu 24.04 x64 上运行。
+1. 下载并解压 [启动与安装包](https://github.com/Shmi11y/Rewards-Panel/releases/download/v0.1.18/RewardsPanel-linux-x64.tar.gz)。需要 Git、Python 3.10+、Node.js 24+ 和 npm，推荐在 Ubuntu 24.04 x64 上运行。
 2. 在解压目录运行 `bash install-linux.sh --with-deps`，首次会联网下载并构建任务引擎、安装 Chromium 和系统库。安装系统库时可能请求 sudo。
 3. 运行 `bash launch-linux.sh`。另开终端，在相同目录执行 `cat data/.api-token`，将令牌填到 `http://127.0.0.1:8765/?k=你的令牌` 末尾后，用浏览器打开。
 4. 在「账号 → 添加账号」完成首次登录。登录窗口在运行面板的 Linux 桌面上弹出，需要可用的 X11 或 XWayland 会话。已有会话后的任务可以无头运行。
@@ -31,7 +35,7 @@ Linux 和 Docker 版提供总览、账号管理、余额同步、手动任务、
 
 Docker 版面板和 Chromium 都在容器内，账号、会话、设置、定时计划和日志保存在命名卷 `rewards-data`。默认同时提供 x64 镜像和源码构建方式。
 
-1. 下载并解压上面的启动与安装包，从其中含 `compose.yaml` 的目录运行 `docker compose up -d --build`。也可下载 [Docker x64 镜像包](https://github.com/Shmi11y/Rewards-Panel/releases/download/v0.1.17/RewardsPanel-docker-amd64.tar.gz)，再执行下列命令跳过构建。
+1. 下载并解压上面的启动与安装包，从其中含 `compose.yaml` 的目录运行 `docker compose up -d --build`。也可下载 [Docker x64 镜像包](https://github.com/Shmi11y/Rewards-Panel/releases/download/v0.1.18/RewardsPanel-docker-amd64.tar.gz)，再执行下列命令跳过构建。
 
    ```sh
    docker load -i RewardsPanel-docker-amd64.tar.gz
