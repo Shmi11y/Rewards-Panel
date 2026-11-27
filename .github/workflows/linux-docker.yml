@@ -36,6 +36,14 @@ jobs:
           panel_pid=$!
           trap 'kill "$panel_pid" 2>/dev/null || true; cat "$RUNNER_TEMP/rewards-linux.log"' EXIT
           python3 tools/smoke-panel.py linux "$REWARDS_DATA_DIR/.api-token"
+          tar --exclude='./.git' --exclude='./.github' --exclude='./node_modules'             -czf RewardsPanel-linux-x64.tar.gz             VERSION LICENSE THIRD-PARTY-NOTICES.md README.md             install-linux.sh launch-linux.sh panel assets             app browser run_history.py scheduler.py task-data.cjs run-events.cjs login.js
+      - uses: actions/upload-artifact@v4
+        if: github.event_name == 'push'
+        with:
+          name: linux-x64
+          path: RewardsPanel-linux-x64.tar.gz
+          compression-level: 0
+          if-no-files-found: error
 
   docker:
     runs-on: ubuntu-24.04
