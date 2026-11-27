@@ -261,6 +261,7 @@ def status() -> dict:
     done = done_today(data, now)
     st = startup_status()
     st.update({
+        "participation": run_history.participation(DATA),
         "mode": data.get("mode", "manual"),
         "times": data.get("times", []),
         "groups": data["groups"],

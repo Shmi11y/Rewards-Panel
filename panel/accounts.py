@@ -33,6 +33,7 @@ from datetime import datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+import account_holds
 import run_history
 from panel import balance
 
@@ -486,6 +487,7 @@ def summary() -> dict:
         last_verified = last_login if type(last_login) is int else 0
         needs_login = login_failures.get(acc["email"].casefold(), 0) > last_verified
         latest = balances.get(acc["email"].casefold(), {})
+        hold = account_holds.get(DATA_DIR, acc["email"])
         items.append({
             "email": acc["email"],
             "alias": acc.get("alias") or acc["email"].split("@")[0],
@@ -494,6 +496,7 @@ def summary() -> dict:
             "active": (data.get("active") or "").lower() == acc["email"].lower(),
             "loggedIn": bool(upd) and not needs_login,
             "needsLogin": needs_login,
+            "taskHold": hold["reason"] if hold else None,
             "sessionHours": round((now - upd) / 3600000, 1) if upd else None,
             "points": points.get(mask_of(acc["email"]), 0),
             "balance": latest.get("balance"),
@@ -519,6 +522,22 @@ def summary() -> dict:
 
 # ---------------------------------------------------------------- 登录任务
 
+def resume_task_account(email: str) -> dict:
+    with _lock:
+        if not _find(load(), email):
+            return {"ok": False, "msg": "找不到该账号"}
+        try:
+            account_holds.resume(DATA_DIR, email)
+        except OSError:
+            return {"ok": False, "msg": "无法清除账号暂停状态，请检查数据目录权限"}
+        return {"ok": True}
+
+
+def login_in_progress() -> bool:
+    with _lock:
+        return any(job["state"] == "running" for job in _jobs.values())
+
+
 def start_login(email: str, *, existing_only: bool = False) -> dict:
     email = email.strip()
     if not email or "@" not in email:
@@ -526,6 +545,8 @@ def start_login(email: str, *, existing_only: bool = False) -> dict:
     if not NODE.exists() or not LOGIN_JS.exists():
         return {"ok": False, "msg": "缺少 node.exe 或 login.js"}
     with _lock:
+        if account_holds.get(DATA_DIR, email):
+            return {"ok": False, "msg": "账号已暂停，请到微软官网确认后手动恢复"}
         if existing_only:
             account = _find(load(), email)
             if account is None:

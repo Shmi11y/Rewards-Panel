@@ -11,6 +11,7 @@ import shutil
 import sqlite3
 import subprocess
 import sys
+import threading
 import time
 from collections import deque
 from contextlib import closing
@@ -21,6 +22,7 @@ from tempfile import NamedTemporaryFile
 ROOT = Path(__file__).resolve().parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+import account_holds
 import windows_notifications
 
 SCHEMA = """
@@ -48,7 +50,7 @@ CREATE TABLE account_login_failures (
     required_at REAL NOT NULL
 )
 """
-ACCOUNT_FAILURES = {"failed", "needs_login", "skipped"}
+ACCOUNT_FAILURES = {"failed", "needs_login", "skipped", "restricted"}
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 BUSY_EXIT = 75
 RUN_LOG_LIMIT = 512 * 1024
@@ -59,7 +61,8 @@ def _log_file(data: Path, run_id: int) -> Path:
     return data / "run-logs" / f"{run_id}.log"
 
 
-NOTICE_TYPES = {"success", "failed", "login", "update", "scheduler"}
+NOTICE_TYPES = {"success", "failed", "login", "update", "scheduler", "restriction", "reminder"}
+PARTICIPATION_MODES = {"reminder", "automatic"}
 
 
 def _notices(data: Path) -> sqlite3.Connection:
@@ -158,6 +161,35 @@ def _connect(data: Path) -> sqlite3.Connection:
     return conn
 
 
+def participation(data: Path) -> str:
+    """Return the saved mode, defaulting to reminders until automation is explicitly selected."""
+    data.mkdir(parents=True, exist_ok=True)
+    with closing(_connect(data)) as conn, conn:
+        if conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'participation'").fetchone():
+            return conn.execute("SELECT mode FROM participation WHERE id = 1").fetchone()[0]
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute("CREATE TABLE IF NOT EXISTS participation (id INTEGER PRIMARY KEY, mode TEXT NOT NULL)")
+        legacy = any((data / name).is_file() for name in ("accounts.json", ".env", "schedule.json"))
+        if not legacy and conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'runs'").fetchone():
+            legacy = conn.execute("SELECT 1 FROM runs LIMIT 1").fetchone() is not None
+        conn.execute("INSERT OR IGNORE INTO participation VALUES (1, ?)", ("pending" if legacy else "reminder",))
+        conn.execute(SCHEMA)
+        return conn.execute("SELECT mode FROM participation WHERE id = 1").fetchone()[0]
+
+
+def set_participation(data: Path, mode) -> dict:
+    if not isinstance(mode, str) or mode not in PARTICIPATION_MODES:
+        return {"ok": False, "msg": "参与模式不合法"}
+    participation(data)
+    with closing(_connect(data)) as conn, conn:
+        _begin_write(conn)
+        active = conn.execute("SELECT runner_pid FROM runs WHERE status = 'running'").fetchone()
+        if active and process_alive(active[0]):
+            return {"ok": False, "msg": "请等待当前任务结束，或先停止任务"}
+        conn.execute("UPDATE participation SET mode = ? WHERE id = 1", (mode,))
+    return {"ok": True, "participation": mode}
+
+
 def _begin_write(conn: sqlite3.Connection) -> None:
     conn.execute("BEGIN IMMEDIATE")
     conn.execute(SCHEMA)
@@ -231,6 +263,18 @@ def processed_slots(data: Path, since: int) -> set[int]:
         return {row[0] for row in rows}
 
 
+def scheduled_run_finished(data: Path, slot: int) -> bool:
+    if not (data / "runs.sqlite3").is_file():
+        return False
+    with closing(_connect(data)) as conn:
+        if not any(row["name"] == "scheduled_at" for row in conn.execute("PRAGMA table_info(runs)")):
+            return False
+        return conn.execute(
+            "SELECT 1 FROM runs WHERE scheduled_at = ? AND status IN ('success', 'skipped', 'reminded')",
+            (slot,),
+        ).fetchone() is not None
+
+
 def record_skips(data: Path, skips: list[tuple[int, str]]) -> None:
     if not skips:
         return
@@ -278,15 +322,30 @@ def _claim(data: Path, source: str, scheduled_at: int | None, schedule_kind: str
     return run_id
 
 
+def _points_outcome(status: str, points: int | None, accounts: list[dict]) -> str | None:
+    if points is not None and points != 0:
+        return "increased" if points > 0 else "decreased"
+    if points == 0 and any(account.get("points") not in (None, 0) for account in accounts):
+        return "net_zero"
+    if status != "success":
+        return None
+    if points is None or any(account["status"] == "success" and account.get("points") is None for account in accounts):
+        return "unavailable"
+    return "unchanged"
+
+
 def _view(row: sqlite3.Row) -> dict:
     status = row["status"]
     if status == "running" and not process_alive(row["runner_pid"]):
         status = "interrupted"
     fields = row.keys()
+    accounts = json.loads(row["accounts"])
+    points = row["points"]
     return {
         "id": row["id"], "source": row["source"], "startedAt": row["started_at"],
         "finishedAt": row["finished_at"], "status": status, "exitCode": row["exit_code"],
-        "accounts": json.loads(row["accounts"]), "points": row["points"], "reason": row["reason"],
+        "accounts": accounts, "points": points, "pointsOutcome": _points_outcome(status, points, accounts),
+        "reason": row["reason"],
         "scheduledAt": row["scheduled_at"] if "scheduled_at" in fields else None,
         "scheduleKind": row["schedule_kind"] if "schedule_kind" in fields else None,
     }
@@ -486,7 +545,13 @@ def _read_events(events: Path) -> tuple[dict, dict, tuple[bool, bool], bool]:
                     skipped = True
                 else:
                     row = account(event["email"])
-                    if kind == "login":
+                    if kind == "restricted":
+                        row["status"] = "restricted"
+                        row["restriction"] = event["reason"]
+                        row.pop("phase", None)
+                    elif row["status"] in {"restricted", "held"}:
+                        continue
+                    elif kind == "login":
                         login[row["email"].casefold()] = event.get("at")
                     elif kind == "login_ok":
                         login.pop(row["email"].casefold(), None)
@@ -508,6 +573,8 @@ def _results(events: Path, code: int) -> tuple[str, list[dict], int | None]:
     accounts, login, (ended, failed), skipped = _read_events(events)
     for key, row in accounts.items():
         row.pop("phase", None)
+        if row["status"] in {"restricted", "held"}:
+            continue
         if skipped:
             row["status"] = "not_run"
         elif key in login and row["status"] in {"failed", "started"}:
@@ -526,7 +593,7 @@ def _results(events: Path, code: int) -> tuple[str, list[dict], int | None]:
         status = "skipped"
     elif code != 0 or failed or statuses & ACCOUNT_FAILURES:
         status = "partial" if "success" in statuses and len(statuses) > 1 else "failed"
-    elif ended and statuses == {"success"}:
+    elif ended and "success" in statuses and statuses <= {"success", "held"}:
         status = "success"
     else:
         status = "unknown"
@@ -559,28 +626,66 @@ def _notify(data: Path, run_id: int, source: str, status: str, accounts: list[di
             points: int | None = None) -> None:
     if status not in {"success", "failed", "partial"}:
         return
+    if any(row["status"] == "restricted" for row in accounts) and not any(
+        row["status"] in {"failed", "needs_login"} for row in accounts
+    ):
+        return  # The restriction already has its own actionable notice.
     login_count = sum(account["status"] == "needs_login" for account in accounts)
     source_label = {"manual": "手动任务", "daily": "定时任务", "boot": "开机任务"}[source]
     if status == "success":
         title = "Rewards 任务完成"
-        result = "全部账号已完成"
-        if points is not None:
-            result += f"，新增 {points} 积分"
+        result = "任务已完成"
+        outcome = _points_outcome(status, points, accounts)
+        if outcome == "increased":
+            result += f"，积分净增加 {points}"
+        elif outcome == "decreased":
+            result += f"，积分净减少 {abs(points)}"
+        elif outcome == "net_zero":
+            result += "，积分净变化为 0"
+        elif outcome == "unchanged":
+            result += "，本次未观察到积分增加"
+        elif outcome == "unavailable":
+            result += "，未取得完整计分结果"
     else:
         title = "Rewards 需要重新登录" if login_count else "Rewards 运行失败"
         result = f"{login_count} 个账号需要重新登录" if login_count else ("部分账号未完成" if status == "partial" else "运行未完成")
     message = f"{source_label}：{result}。点击查看本次运行记录。"
     category = "login" if login_count else "success" if status == "success" else "failed"
-    if not record_notice(data, category, title, message, run_id=run_id, event=f"run:{run_id}"):
+    _send_notice(data, run_id, category, title, message, f"run:{run_id}")
+
+
+def _send_notice(data: Path, run_id: int, category: str, title: str, message: str, event: str) -> None:
+    if not record_notice(data, category, title, message, run_id=run_id, event=event):
         return
     try:
-        windows_notifications.show(ROOT, data, run_id, title, message)
+        if category == "reminder":
+            windows_notifications.show(ROOT, data, None, title, message, reminder=True)
+        else:
+            windows_notifications.show(ROOT, data, run_id, title, message)
     except Exception as exc:  # The result is already committed, independently of Windows delivery.
         try:
             with (data / "notifications.log").open("a", encoding="utf-8") as stream:
                 stream.write(f"{datetime.now():%Y-%m-%d %H:%M:%S} {exc}\n")
         except OSError:
             pass
+
+
+def _watch_account_holds(data: Path, run_id: int, done: threading.Event) -> None:
+    sent = set()
+    while True:
+        final_scan = done.is_set()
+        for path in (data / "account-holds").glob("*.json"):
+            if path in sent:
+                continue
+            hold = account_holds.read_file(path)
+            if hold and hold.get("runId") == run_id and hold["reason"] in account_holds.REASONS:
+                sent.add(path)
+                message = account_holds.REASONS[hold["reason"]] + "。已暂停该账号，请到微软官网确认后手动恢复。点击查看运行记录。"
+                _send_notice(data, run_id, "restriction", "Rewards 已暂停异常账号", message,
+                             f"restriction:{run_id}:{path.stem}")
+        if final_scan:
+            return
+        done.wait(0.4)
 
 
 def _capture_output(source, destination) -> None:
@@ -623,9 +728,23 @@ def run(data: Path, source: str, scheduled_at: int | None = None, schedule_kind:
         )
         if paused or past_plan:
             return 0 if source == "boot" else BUSY_EXIT
+    participation(data)
     run_id = _claim(data, source, scheduled_at, schedule_kind)
     if run_id is None:
         return BUSY_EXIT
+    mode = participation(data)
+    if mode != "automatic":
+        if mode == "pending" or schedule_kind == "retry":
+            reason = "请在面板确认参与模式" if mode == "pending" else "仅查看与提醒模式已跳过任务重试"
+            _finish(data, run_id, "skipped", [], None, 0, reason)
+        else:
+            label = {"manual": "手动提醒", "daily": "每日提醒", "boot": "开机提醒"}[source]
+            if schedule_kind == "catch_up":
+                label = "定时补提醒"
+            _finish(data, run_id, "reminded", [], None, 0, None)
+            _send_notice(data, run_id, "reminder", "Microsoft Rewards 提醒",
+                         f"{label}。点击打开微软 Rewards。", f"reminder:{run_id}")
+        return 0
     code, reason = 1, None
     status, accounts, points = "failed", [], None
     try:
@@ -636,7 +755,7 @@ def run(data: Path, source: str, scheduled_at: int | None = None, schedule_kind:
         try:
             env = dict(os.environ, REWARDS_DATA_DIR=str(data), REWARDS_APP_ROOT=str(ROOT),
                        PLAYWRIGHT_BROWSERS_PATH=str(ROOT / "browser"), REWARDS_RUN_EVENTS=str(events),
-                       NODE_NO_WARNINGS="1")
+                       NODE_NO_WARNINGS="1", REWARDS_RUN_ID=str(run_id))
             node, entry, preload = ROOT / "app/node.exe", ROOT / "app/dist/index.js", ROOT / "task-data.cjs"
             missing = next((path for path in (node, entry, preload) if not path.is_file()), None)
             if missing:
@@ -659,8 +778,15 @@ def run(data: Path, source: str, scheduled_at: int | None = None, schedule_kind:
                         if stop:
                             _stop_engine(proc.pid)
                         assert proc.stdout is not None
-                        _capture_output(proc.stdout, capture)
-                        code = proc.wait()
+                        done = threading.Event()
+                        watcher = threading.Thread(target=_watch_account_holds, args=(data, run_id, done), daemon=True)
+                        watcher.start()
+                        try:
+                            _capture_output(proc.stdout, capture)
+                            code = proc.wait()
+                        finally:
+                            done.set()
+                            watcher.join()
                 finally:
                     if capture is not None:
                         capture.close()

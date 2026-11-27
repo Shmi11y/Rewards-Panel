@@ -15,6 +15,7 @@ AUMID = "Rewards.Desktop.App"
 TOAST_CLSID = "{AA64FBC0-B3BD-461F-A0E9-EC27B0B6E89D}"
 SHORTCUT_NAME = "Rewards.lnk"
 MAX_RUN_ID = 2**53 - 1
+REWARDS_DASHBOARD = "https://rewards.bing.com/dashboard"
 
 
 def valid_run_id(value) -> bool:
@@ -102,13 +103,14 @@ def register_shortcut(root: Path, *, refresh: bool = False) -> Path:
     return path
 
 
-def show(root: Path, data: Path, run_id: int | None, title: str, message: str) -> None:
+def show(root: Path, data: Path, run_id: int | None, title: str, message: str, *, reminder: bool = False) -> None:
     if run_id is not None and not valid_run_id(run_id):
         raise ValueError("运行编号不合法")
-    uri = f"{_register_protocol(root, data)}://run/{run_id}" if run_id is not None else ""
+    uri = REWARDS_DASHBOARD if reminder else f"{_register_protocol(root, data)}://run/{run_id}" if run_id is not None else ""
+    action = "打开微软 Rewards" if reminder else "查看运行记录"
     register_shortcut(root, refresh=True)
     env = dict(os.environ, REWARDS_TOAST_ID=AUMID, REWARDS_TOAST_TITLE=title,
-               REWARDS_TOAST_BODY=message, REWARDS_TOAST_URI=uri)
+               REWARDS_TOAST_BODY=message, REWARDS_TOAST_URI=uri, REWARDS_TOAST_ACTION=action)
     script = r"""
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
@@ -121,9 +123,10 @@ try {
     [Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType=WindowsRuntime] > $null
     $xml = [Windows.Data.Xml.Dom.XmlDocument]::new()
     if ($env:REWARDS_TOAST_URI) {
-        $xml.LoadXml('<toast activationType="protocol"><visual><binding template="ToastGeneric"><text/><text/></binding></visual><actions><action content="查看运行记录" activationType="protocol"/></actions></toast>')
+        $xml.LoadXml('<toast activationType="protocol"><visual><binding template="ToastGeneric"><text/><text/></binding></visual><actions><action activationType="protocol"/></actions></toast>')
         $xml.DocumentElement.SetAttribute('launch', $env:REWARDS_TOAST_URI)
         $xml.GetElementsByTagName('action').Item(0).SetAttribute('arguments', $env:REWARDS_TOAST_URI)
+        $xml.GetElementsByTagName('action').Item(0).SetAttribute('content', $env:REWARDS_TOAST_ACTION)
     } else {
         $xml.LoadXml('<toast><visual><binding template="ToastGeneric"><text/><text/></binding></visual></toast>')
     }

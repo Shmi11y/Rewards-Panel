@@ -13,11 +13,13 @@ from pywintypes import error as Win32Error
 
 class Tray:
     CALLBACK = win32con.WM_APP + 1
-    OPEN, PAUSE, EXIT, TOMORROW, CHOOSE_TIME = 1, 2, 3, 4, 5
+    OPEN, PAUSE, EXIT, TOMORROW, CHOOSE_TIME, REWARDS = 1, 2, 3, 4, 5, 6
 
-    def __init__(self, icon: Path, open_panel, schedule_status, set_paused, open_pause_picker, exit_app, log) -> None:
+    def __init__(self, icon: Path, open_panel, schedule_status, set_paused, open_pause_picker, exit_app, log,
+                 *, open_rewards) -> None:
         self.icon = icon
         self.open_panel = open_panel
+        self.open_rewards = open_rewards
         self.schedule_status = schedule_status
         self.set_paused = set_paused
         self.open_pause_picker = open_pause_picker
@@ -123,8 +125,12 @@ class Tray:
         menu = win32gui.CreatePopupMenu()
         try:
             win32gui.AppendMenu(menu, win32con.MF_STRING, self.OPEN, "打开面板")
+            win32gui.AppendMenu(menu, win32con.MF_STRING, self.REWARDS, "打开微软 Rewards")
             deadline = status.get("pauseUntil")
-            info = f"暂停至：{deadline or '手动恢复'}" if enabled and paused else f"下次运行：{next_run or '—'}"
+            label = "下次运行" if status.get("participation") == "automatic" else "下次提醒"
+            info = f"暂停至：{deadline or '手动恢复'}" if enabled and paused else f"{label}：{next_run or '—'}"
+            if status.get("participation") == "pending":
+                info = "请在面板选择参与模式"
             win32gui.AppendMenu(menu, win32con.MF_STRING | win32con.MF_GRAYED, 0, info)
             label = "立即恢复" if paused else "暂停定时（手动恢复）"
             flags = win32con.MF_STRING if enabled else win32con.MF_STRING | win32con.MF_GRAYED
@@ -148,7 +154,7 @@ class Tray:
             if self.hwnd:
                 win32gui.PostMessage(self.hwnd, win32con.WM_NULL, 0, 0)
 
-        command = {self.OPEN: self.open_panel, self.PAUSE: lambda: self.set_paused(not paused),
+        command = {self.OPEN: self.open_panel, self.REWARDS: self.open_rewards, self.PAUSE: lambda: self.set_paused(not paused),
                    self.TOMORROW: lambda: self.set_paused(True, "tomorrow"), self.CHOOSE_TIME: self.open_pause_picker,
                    self.EXIT: self.exit_app}.get(choice)
         if command is not None:

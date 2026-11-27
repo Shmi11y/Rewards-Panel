@@ -69,7 +69,12 @@
   .row.top{align-items:start}
   .about-columns{display:grid;grid-template-columns:1.5fr 1fr;gap:18px;align-items:start}
   .about-column{display:grid;gap:18px;align-content:start;min-width:0}
-  @media(max-width:1100px){.about-columns{grid-template-columns:1fr}}
+  .about-version{grid-column:2;grid-row:1}
+  .about-tools{grid-column:1;grid-row:1}
+  @media(max-width:1100px){
+    .about-columns{grid-template-columns:1fr}
+    .about-version,.about-tools{grid-column:auto;grid-row:auto}
+  }
   @media(max-width:1100px){.c4{grid-template-columns:repeat(2,1fr)}.c2{grid-template-columns:1fr}}
   .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:20px 22px;box-shadow:var(--sh)}
   .k{color:var(--muted);font-size:12px}
@@ -87,8 +92,20 @@
   @media(max-width:1100px){.hero{grid-template-columns:1fr 1fr}.hero>div{border-top:1px solid var(--line)}}
   .recent-run{width:100%;display:flex;align-items:center;gap:16px;text-align:left;margin-bottom:18px;padding:14px 22px}
   .recent-run .run-meta{flex:1;min-width:0;color:var(--muted);font-size:13px}
-  .home-schedule{display:flex;align-items:center;flex-wrap:wrap;gap:8px 16px;margin-bottom:18px;padding:12px 22px}
+  .home-schedule{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:12px 16px;margin-bottom:18px;padding:12px 22px}
   .home-schedule [hidden]{display:none}
+  .home-schedule-main,.home-schedule-actions,.home-participation{display:flex;align-items:center;flex-wrap:wrap;gap:8px 12px}
+  .home-schedule-actions{grid-column:1/-1;justify-content:flex-end}
+  .home-participation{justify-content:flex-end;padding-left:16px;border-left:1px solid var(--line)}
+  .home-participation .k{white-space:nowrap}
+  @media(max-width:740px){
+    .home-schedule{grid-template-columns:minmax(0,1fr)}
+    .home-participation{padding:12px 0 0;border-left:0;border-top:1px solid var(--line)}
+  }
+  #btnRunIcon[hidden],#btnStop[hidden],#schRetryRow[hidden],.trow [hidden]{display:none}
+  #riskDialog{width:min(480px,calc(100% - 44px))}
+  #riskText{white-space:pre-line}
+  #riskDialog .inline{justify-content:flex-end}
   .home-schedule-next{display:flex;align-items:baseline;flex-wrap:wrap;gap:8px;margin-right:auto}
   .home-schedule-next b{font-size:13px;font-variant-numeric:tabular-nums}
   .home-run-progress{color:var(--accent);font-size:12px;overflow-wrap:anywhere}
@@ -102,7 +119,7 @@
   .run-status{font-size:12px;font-weight:600;color:var(--muted);white-space:nowrap}
   .run-status.success{color:var(--green)}
   .run-status.failed,.run-status.interrupted{color:var(--red)}
-  .run-status.partial,.run-status.needs_login{color:var(--amber)}
+  .run-status.partial,.run-status.needs_login,.run-status.restricted,.run-status.held{color:var(--amber)}
   .run-status.running{color:var(--accent)}
   .run-dialog{inset:0;margin:auto;width:min(710px,calc(100% - 44px));max-height:min(690px,85vh);
     padding:20px 22px;background:var(--panel);color:var(--text);border:1px solid var(--line);
@@ -110,6 +127,11 @@
   .run-dialog::backdrop{background:rgba(16,23,36,.5)}
   .run-dialog-head{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px}
   .run-dialog-head h2{margin:0;font-size:17px}
+  #participationDialog{width:min(440px,calc(100% - 44px))}
+  .participation-help{margin-top:14px;line-height:1.65}
+  .participation-help p{margin:6px 0 0}
+  #participationHint{margin:0 0 14px}
+  .card-actions{margin-top:14px}
   #schedulePauseDialog{width:min(420px,calc(100% - 44px))}
   #schedulePauseForm{display:grid;gap:10px}
   #schedulePauseUntil{width:100%;color-scheme:light dark}
@@ -120,6 +142,7 @@
   .run-entry-body{padding:0 0 12px 16px;overflow-wrap:anywhere}
   .run-entry-body td:last-child{white-space:nowrap}
   .run-entry-actions{margin:10px 0 6px}
+  .run-points-help{display:flex;align-items:center;flex-wrap:wrap;gap:6px 12px;margin:10px 0}
   .run-log{height:auto;max-height:57vh;margin-bottom:0}
   #diagnosticsText{height:auto;max-height:min(490px,calc(85vh - 165px))}
   .qrow{display:flex;justify-content:space-between;font-size:13px;padding:9px 0;border-bottom:1px solid var(--line)}
@@ -291,6 +314,15 @@
   .account-toolbar .inline{gap:8px}
   .account-toolbar .k{margin-right:auto}
   .account-toolbar input.tin{max-width:180px}
+  .account-options{position:relative;min-width:0}
+  .account-options summary{list-style:none}
+  .account-options summary::-webkit-details-marker{display:none}
+  .account-bulk-panel{position:absolute;right:0;z-index:2;display:grid;gap:6px;min-width:max-content;margin-top:8px;padding:8px;
+    background:var(--panel);border:1px solid var(--line);border-radius:10px;box-shadow:var(--sh)}
+  .account-filters{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(130px,100%),1fr));gap:8px;padding:12px;
+    background:var(--panel);border:1px solid var(--line);border-radius:10px}
+  .account-filters[hidden]{display:none}
+  .account-filters .tin{width:100%;min-width:0}
   #accGrid{display:flex;flex-direction:column;gap:12px;container-type:inline-size}
   #accGrid .acc{display:grid;grid-template-columns:minmax(160px,1fr) minmax(260px,1.2fr) 326px;align-items:center;gap:14px;padding:16px 20px}
   #accGrid .acc .acts{justify-content:flex-end}
@@ -306,6 +338,7 @@
   /* 工具栏 */
   .toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
   .tabs .acts{display:flex;align-items:center;gap:8px}
+  .tabs .acts[hidden]{display:none}
   .toolbar .tin{width:200px;flex:none}
   /* 运行选项铺满 */
   #inlineToggles{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px 18px}
@@ -363,7 +396,7 @@
       <button id="notificationButton" class="ghost" title="查看通知">通知<span class="notice-count" id="notificationCount" hidden>0</span></button>
       <span class="spacer"></span>
       <button id="btnRun" class="primary">
-        <svg viewBox="0 0 12 12" width="11" height="11" style="margin-right:5px"><path d="M3 2l7 4-7 4z" fill="currentColor"/></svg>开始任务</button>
+        <svg id="btnRunIcon" viewBox="0 0 12 12" width="11" height="11" style="margin-right:5px" hidden><path d="M3 2l7 4-7 4z" fill="currentColor"/></svg><span id="btnRunLabel">打开微软 Rewards ↗</span></button>
       <button id="btnStop" class="ghost">
         <svg viewBox="0 0 12 12" width="10" height="10" style="margin-right:5px"><rect x="2.5" y="2.5" width="7" height="7" rx="1.4" fill="currentColor"/></svg>停止</button>
       <span class="vsep"></span>
@@ -395,15 +428,23 @@
           <span class="run-status" id="recentRunStatus"></span>
           <span class="k">查看记录 ›</span>
         </button>
-        <div class="card home-schedule" aria-label="自动运行">
-          <strong>自动运行</strong>
-          <span class="run-status" id="homeScheduleState" role="status">读取中…</span>
-          <span class="home-schedule-next"><span class="k" id="homeScheduleNextLabel">下次运行</span><b id="homeScheduleNext">—</b></span>
-          <span class="home-run-progress" id="homeRunProgress" role="status" hidden></span>
-          <span class="run-status failed" id="homeScheduleWarning" role="status" hidden>定时守护未运行</span>
-          <button class="ghost sm" id="homeScheduleTomorrow" hidden>暂停到明天</button>
-          <button class="ghost sm" id="homeScheduleChoose" hidden>暂停到指定时间</button>
-          <button class="ghost sm" id="homeScheduleResume" hidden>恢复定时</button>
+        <div class="card home-schedule" aria-label="定时计划">
+          <div class="home-schedule-main">
+            <strong id="homeScheduleTitle">定时提醒</strong>
+            <span class="run-status" id="homeScheduleState" role="status">读取中…</span>
+            <span class="home-schedule-next"><span class="k" id="homeScheduleNextLabel">下次运行</span><b id="homeScheduleNext">—</b></span>
+            <span class="home-run-progress" id="homeRunProgress" role="status" hidden></span>
+            <span class="run-status failed" id="homeScheduleWarning" role="status" hidden>定时守护未运行</span>
+          </div>
+          <div class="home-participation" id="homeParticipationGroup" hidden>
+            <span class="k" id="homeParticipationMode" role="status"></span>
+            <button class="ghost sm" id="homeParticipation" aria-haspopup="dialog" aria-controls="participationDialog">切换模式</button>
+          </div>
+          <div class="home-schedule-actions" id="homeScheduleActions" hidden>
+            <button class="ghost sm" id="homeScheduleTomorrow" hidden>暂停到明天</button>
+            <button class="ghost sm" id="homeScheduleChoose" hidden>暂停到指定时间</button>
+            <button class="ghost sm" id="homeScheduleResume" hidden>恢复定时</button>
+          </div>
         </div>
         <div class="card" style="margin-bottom:18px">
           <div class="ph" style="margin-bottom:6px"><h2 style="margin:0">积分曲线</h2><span class="sub" id="phaseText" style="margin:0"></span></div>
@@ -426,23 +467,31 @@
         <div class="account-toolbar">
           <div class="inline">
             <div class="k" id="accSummary"></div>
-            <button class="ghost sm" data-bulk="enable_all">全部启用</button>
-            <button class="ghost sm" data-bulk="disable_all">全部停用</button>
-            <button class="ghost sm" data-bulk="remove_disabled">清理停用</button>
-            <button class="ghost sm" id="btnReloginNeeded">批量重登</button>
+            <details class="account-options" id="accountBulk">
+              <summary class="button-link ghost sm">批量操作 <span aria-hidden="true">▾</span></summary>
+              <div class="account-bulk-panel">
+                <button class="ghost sm" data-bulk="enable_all">全部启用</button>
+                <button class="ghost sm" data-bulk="disable_all">全部停用</button>
+                <button class="ghost sm" data-bulk="remove_disabled">清理停用</button>
+                <button class="ghost sm" id="btnReloginNeeded">批量重登</button>
+              </div>
+            </details>
             <a class="button-link sm" id="redeemRewards" href="https://rewards.bing.com/redeem" target="_blank"
                  rel="noopener noreferrer" title="在浏览器打开微软官方兑换页">兑换奖励 <span aria-hidden="true">↗</span></a>
             <button id="btnAdd" class="primary sm">添加账号</button>
           </div>
           <div class="inline">
           <input id="accSearch" class="tin" placeholder="搜索账号…" aria-label="搜索账号">
-          <select id="accSort" class="tin" style="width:124px">
+          <select id="accSort" class="tin" style="width:124px" aria-label="账号排序">
             <option value="default">默认顺序</option>
             <option value="points">按今日得分</option>
             <option value="login">按最近登录</option>
             <option value="email">按邮箱</option>
             <option value="failure">按最近失败</option>
           </select>
+          <button class="ghost sm" id="accountFilters" aria-expanded="false" aria-controls="accountFilterFields">筛选</button>
+          </div>
+          <div class="account-filters" id="accountFilterFields" hidden>
           <select id="accRegion" class="tin" aria-label="地区筛选"><option value="">全部地区</option></select>
           <select id="accLoginState" class="tin" aria-label="登录状态筛选">
             <option value="">全部登录状态</option><option value="valid">已登录</option>
@@ -451,7 +500,7 @@
           <select id="accFailure" class="tin" aria-label="最近失败筛选">
             <option value="">不限失败时间</option><option value="1">近 24 小时失败</option><option value="7">近 7 天失败</option>
           </select>
-          <select aria-label="分组筛选" id="accGroup" class="tin" style="width:110px"><option value="">全部分组</option></select>
+          <select aria-label="分组筛选" id="accGroup" class="tin"><option value="">全部分组</option></select>
           </div>
         </div>
         <div class="grid" id="accGrid"></div>
@@ -504,29 +553,9 @@
         </div>
       </section>
 
-            <section data-page="about">
+      <section data-page="about">
         <div class="about-columns">
-          <div class="about-column">
-            <div class="card">
-              <h2>自检</h2>
-              <div id="selfBox"><div class="empty">读取中</div></div>
-              <div class="inline" style="margin-top:14px;gap:9px">
-                <button class="ghost" id="selfRun">重新检查</button>
-                <button class="ghost" id="btnClean">清理缓存<span class="sub" id="cacheSize" style="margin-left:6px"></span></button>
-              </div>
-            </div>
-            <div class="card">
-              <h2>设置备份</h2>
-              <p class="sub">备份仅包含任务设置、定时计划和界面偏好。账号、密码、登录会话和运行记录留在本机。</p>
-              <div class="inline">
-                <button class="ghost" id="exportSettings">导出设置</button>
-                <button class="ghost" id="importSettings">导入设置</button>
-                <input id="settingsBackupFile" type="file" accept=".json,application/json" hidden>
-              </div>
-              <div class="sub" id="backupStatus" role="status" style="margin-top:8px"></div>
-            </div>
-          </div>
-          <div class="about-column">
+          <div class="about-column about-version">
             <div class="card">
               <h2>关于</h2>
               <div class="kv" id="aboutBox"></div>
@@ -548,17 +577,19 @@
                 <div class="sub update-notes" id="updateNotes" tabindex="0"></div>
                 <p><button class="ghost" id="downloadUpdate" hidden>下载新版 ZIP</button></p>
               </div>
+              <p class="sub" id="updateInstallResult" role="status" hidden></p>
               <div class="update-details" id="updateTransfer" hidden>
                 <p class="sub" id="updateTransferStatus" role="status"></p>
                 <progress id="updateProgress" max="100" aria-label="更新包下载进度"></progress>
                 <div id="updateGuide" hidden>
                   <p class="sub" id="updateArchivePath"></p>
                   <p class="sub" id="updateRecovery"></p>
+                  <button class="primary" id="installUpdate" hidden>一键更新并重启</button>
                   <button class="ghost" id="openUpdateFolder">打开下载目录</button>
                   <ol class="sub update-guide">
                     <li>结束正在运行的任务并退出程序。若面板留在托盘，请从托盘菜单选择「退出程序」。</li>
                     <li>解压 ZIP，将其中 RewardsPanel 文件夹的内容覆盖到原程序目录，保留 <b>data/</b>。</li>
-                    <li>双击原目录的 Rewards.exe。启用每天定时的用户可重新登录 Windows，让守护进程加载新版。</li>
+                    <li>双击原目录的 Rewards.exe。若总览提示定时守护未运行，可点击「恢复定时」。</li>
                   </ol>
                 </div>
               </div>
@@ -568,9 +599,41 @@
               </div>
             </div>
             <div class="card">
+              <h2>使用风险与免责声明</h2>
+              <p class="sub">本程序仅供学习与交流，是独立的第三方项目。使用者应遵守微软 Rewards 条款，自行判断并承担使用风险。微软可能限制计分或兑换、停用 Rewards 账号或取消积分。</p>
+              <p class="sub">微软规定每人只能使用一个 Rewards 账号，每户最多六个。家庭成员分别使用自己的账号和同一人使用多个账号赚分是两种情况。微软公开条款未规定共用设备本身会导致自动停用。</p>
+              <p class="sub">微软禁止使用机器人、宏或其他自动化方式赚取积分。你可以使用「仅查看与提醒」，在微软官网自行完成活动。</p>
+              <div class="inline card-actions">
+                <a class="button-link ghost sm" href="https://www.microsoft.com/en/servicesagreement/" target="_blank" rel="noopener noreferrer">微软服务协议 ↗</a>
+                <a class="button-link ghost sm" href="https://support.microsoft.com/en-us/accounts-billing/rewards/getting-the-most-out-of-microsoft-rewards" target="_blank" rel="noopener noreferrer">账号政策 ↗</a>
+              </div>
+            </div>
+            <div class="card">
               <h2>脱敏诊断报告</h2>
               <p class="sub">包含版本、启动日志节选和最近一次失败摘要，可用于反馈问题。</p>
-              <button class="ghost" id="previewDiagnostics">预览诊断报告</button>
+              <div class="inline card-actions">
+                <button class="ghost" id="previewDiagnostics">预览诊断报告</button>
+              </div>
+            </div>
+          </div>
+          <div class="about-column about-tools">
+            <div class="card">
+              <h2>自检</h2>
+              <div id="selfBox"><div class="empty">读取中</div></div>
+              <div class="inline card-actions" style="gap:9px">
+                <button class="ghost" id="selfRun">重新检查</button>
+                <button class="ghost" id="btnClean">清理缓存<span class="sub" id="cacheSize" style="margin-left:6px"></span></button>
+              </div>
+            </div>
+            <div class="card">
+              <h2>设置备份</h2>
+              <p class="sub">备份仅包含任务设置、定时计划和界面偏好。账号、密码、登录会话和运行记录留在本机。</p>
+              <div class="inline card-actions">
+                <button class="ghost" id="exportSettings">导出设置</button>
+                <button class="ghost" id="importSettings">导入设置</button>
+                <input id="settingsBackupFile" type="file" accept=".json,application/json" hidden>
+              </div>
+              <div class="sub" id="backupStatus" role="status" style="margin-top:8px"></div>
             </div>
           </div>
         </div>
@@ -580,8 +643,8 @@
         <div class="tabs" id="setTabs">
           <div class="tab on" data-tab="t1">任务</div>
           <div class="tab" data-tab="t2">节奏与运行</div>
-          <div class="tab" data-tab="t3">自动运行</div>
-          <div class="acts"><button class="ghost sm" id="cfgReload">重新载入</button><button class="primary sm" id="cfgSave">保存设置</button></div>
+          <div class="tab" data-tab="t3">定时计划</div>
+          <div class="acts" id="taskConfigActions"><button class="ghost sm" id="cfgReload">重新载入</button><button class="primary sm" id="cfgSave">保存设置</button></div>
         </div>
         <div class="pane on" data-pane="t1">
         <div class="card" >
@@ -610,9 +673,9 @@
             <h2 style="margin:0">搜索节奏</h2>
             <div class="seg segw" id="segPace">
               <button data-p="fast">很快</button>
-              <button data-p="def">官方默认</button>
+              <button data-p="def">引擎默认</button>
               <button data-p="mid">折中</button>
-              <button data-p="slow">保守</button>
+              <button data-p="slow">较慢</button>
               <button data-p="vslow">极慢</button>
               <button data-p="custom">自定义</button>
             </div>
@@ -647,18 +710,18 @@
         <div class="pane" data-pane="t3">
         <div class="row c2">
           <div class="card">
-            <h2>自动运行</h2>
+            <h2 id="scheduleTitle">定时提醒</h2>
             <div class="seg" id="segMode">
               <button data-mode="manual">手动</button>
               <button data-mode="daily">每天定时</button>
-              <button data-mode="boot">开机自动</button>
+              <button data-mode="boot" id="schBootMode">开机提醒</button>
             </div>
             <div id="timeRow" style="display:none;margin-top:14px">
               <div class="k" style="margin-bottom:8px">每天执行时间（最多 4 个）</div>
               <div id="timeRows"></div><datalist id="scheduleGroups"></datalist>
               <button class="ghost sm" id="schAddTime">+ 添加时间点</button>
               <label class="chk" style="margin-left:12px"><input type="checkbox" id="schWeekday">仅工作日（周一至周五）</label>
-              <div class="inline" style="margin-top:12px">
+              <div class="inline" id="schRetryRow" style="margin-top:12px">
                 <span class="k">失败重试</span>
                 <select id="schRetry" class="tin" style="width:132px">
                   <option value="0">不重试</option>
@@ -669,19 +732,18 @@
               <div class="inline" style="margin-top:12px">
                 <label class="k" for="schCatchUp">错过定时时</label>
                 <select id="schCatchUp" class="tin" style="width:132px">
-                  <option value="latest">补最近一次</option>
+                  <option value="latest" id="schCatchLatest">补最近一次提醒</option>
                   <option value="skip">直接跳过</option>
                 </select>
-                <label class="k" for="schCatchLimit">补跑时限</label>
+                <label class="k" for="schCatchLimit" id="schCatchLabel">补提醒时限</label>
                 <input type="number" id="schCatchLimit" class="tin" style="width:78px" min="1" max="1440" step="1" value="720">
                 <span class="k">分钟</span>
               </div>
-              <div class="sub">关机或休眠后的补跑和跳过结果会显示在首页「最近运行」。</div>
+              <p class="sub card-actions" id="schCatchNote">错过定时后的提醒和跳过记录会显示在首页「最近运行」。</p>
             </div>
             <div class="sub" id="schHint" style="margin-top:12px"></div>
-            <div style="display:flex;gap:9px;margin-top:14px">
+            <div class="inline card-actions">
               <button class="primary" id="schSave">保存定时</button>
-              <button class="ghost" id="schRunNow">立即跑一次</button>
               <button class="ghost" id="schSkip">今天跳过</button>
               <button class="ghost" id="schResume" hidden>恢复定时</button>
             </div>
@@ -754,6 +816,34 @@
   </div>
   <p id="runHistoryFeedback" class="sub" role="status" hidden></p>
   <div id="runHistoryList"></div>
+</dialog>
+
+<dialog class="run-dialog" id="riskDialog" aria-labelledby="riskTitle" aria-describedby="riskText">
+  <form method="dialog">
+    <h2 id="riskTitle">使用风险</h2>
+    <p id="riskText" class="sub"></p>
+    <div class="inline">
+      <button class="ghost" value="cancel" autofocus>取消</button>
+      <button class="primary" value="continue">我已了解，继续</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog class="run-dialog" id="participationDialog" aria-labelledby="participationTitle">
+  <div class="run-dialog-head">
+    <h2 id="participationTitle">参与模式</h2>
+    <form method="dialog"><button class="ghost sm" autofocus>关闭</button></form>
+  </div>
+  <p class="sub" id="participationHint" hidden>选择后，已有账号和定时计划会保留。</p>
+  <div class="seg" id="participationMode" role="group" aria-label="选择参与模式">
+    <button data-participation="reminder" aria-pressed="false">仅查看与提醒</button>
+    <button data-participation="automatic" aria-pressed="false">自动任务</button>
+  </div>
+  <div class="sub participation-help">
+    <p><strong>仅查看与提醒</strong>　查看积分，按计划接收提醒。</p>
+    <p><strong>自动任务</strong>　手动启动任务，已启用的定时和开机计划也会自动执行。</p>
+  </div>
+  <p class="err" id="participationError" role="alert" hidden></p>
 </dialog>
 
 <dialog class="run-dialog" id="runLogDialog" aria-labelledby="runLogTitle">
@@ -834,7 +924,7 @@ const PROFILES = {
 const PROFILE_HINT = {
   relax:    '只跑桌面搜索、签到、每日任务、领取奖励和阅读赚积分。单账号十几分钟，动的地方最少。',
   standard: '常规项目基本都覆盖到了。单账号 20-30 分钟，平时用这一档就够。',
-  full:     '在标准档基础上再开额外搜索和视觉搜索。单账号 40-60 分钟，跑得越久越容易触发风控。',
+  full:     '在标准档基础上再开额外搜索和视觉搜索。单账号约需 40–60 分钟。',
   custom:   '你自己挑的组合。',
 };
 const PACE = {
@@ -853,6 +943,64 @@ let STATUS=null, CONFIG=null, DRAFT=null, BUSY=false, PAGE='home', SCH_DIRTY=fal
 let SCH_TIMES=['09:10'], SCH_GROUPS=[''], LOGS=[], DETAIL=null, PREFS={theme:'light',onlyActive:false,keepInTray:true}, LAST_DETAIL=0;
 let SCHEDULE_PAUSE_BUSY=false;
 let runNoticeKey=null;
+const REWARDS_DASHBOARD='https://rewards.bing.com/dashboard';
+const RISK_TEXT='本程序仅供学习与交流。微软禁止使用机器人、宏或其他自动化方式赚取积分，并规定每人只能使用一个 Rewards 账号、每户最多六个。违反规则可能导致计分或兑换受限、账号停用或积分被取消。\n\n启用自动任务后，已有定时和开机计划会按自动任务模式执行。完整说明可在「关于」里查看。';
+let riskConfirmationPending=false;
+let riskAcknowledgedHere=false;
+let participationSwitchPending=false;
+
+async function confirmRisk(){
+  if(riskAcknowledgedHere || STATUS?.riskAcknowledged) return true;
+  if(riskConfirmationPending) return false;
+  riskConfirmationPending=true;
+  const prompt=$('riskDialog');
+  try{
+    $('riskText').textContent=RISK_TEXT;
+    prompt.returnValue='cancel';
+    const confirmed=await new Promise(resolve=>{
+      prompt.addEventListener('close',()=>resolve(prompt.returnValue==='continue'),{once:true});
+      prompt.showModal();
+    });
+    if(!confirmed) return false;
+    const result=await post('/api/risk/acknowledge',{confirmed:true});
+    if(!result.ok) throw new Error(result.msg||'无法保存风险确认');
+    riskAcknowledgedHere=true;
+    return true;
+  }catch(error){
+    toast(error.message||'无法保存风险确认');
+    return false;
+  }finally{
+    riskConfirmationPending=false;
+  }
+}
+
+function renderParticipation(schedule,running){
+  const mode=schedule?.participation;
+  const automatic=mode==='automatic';
+  $('btnRunLabel').textContent=automatic?'开始任务':'打开微软 Rewards ↗';
+  $('btnRunIcon').toggleAttribute('hidden',!automatic);
+  $('btnStop').hidden=!automatic&&!running;
+  $('homeParticipationGroup').hidden=!mode;
+  $('homeParticipationMode').textContent=automatic?'自动任务':mode==='reminder'?'仅查看与提醒':'';
+  $('homeParticipationMode').hidden=mode==='pending';
+  $('homeParticipation').textContent=mode==='pending'?'选择模式':'切换模式';
+  $('homeParticipation').disabled=running||participationSwitchPending;
+  $('homeParticipation').title=running?'任务结束后可切换模式':'';
+  $('homeScheduleTitle').textContent=automatic?'自动运行':'定时提醒';
+  $('scheduleTitle').textContent=$('homeScheduleTitle').textContent;
+  $('schBootMode').textContent=automatic?'开机自动':'开机提醒';
+  $('schRetryRow').hidden=!automatic;
+  $('schCatchLatest').textContent=automatic?'补最近一次':'补最近一次提醒';
+  $('schCatchLabel').textContent=automatic?'补跑时限':'补提醒时限';
+  $('schCatchNote').textContent=automatic?'关机或休眠后的补跑和跳过结果会显示在首页「最近运行」。':'错过定时后的提醒和跳过记录会显示在首页「最近运行」。';
+  $('participationHint').hidden=mode!=='pending';
+  $('participationMode').querySelectorAll('button').forEach(button=>{
+    const selected=button.dataset.participation===mode;
+    button.classList.toggle('on',selected);
+    button.setAttribute('aria-pressed',String(selected));
+    button.disabled=running||participationSwitchPending;
+  });
+}
 
 function notifyRunFinished(run){
   if(!run || run.id==null) return;
@@ -862,7 +1010,10 @@ function notifyRunFinished(run){
   runNoticeKey=key;
   const category=run.status==='success'?'success':run.accounts.some(a=>a.status==='needs_login')?'login':'failed';
   if(STATUS.noticeMuted?.includes(category)) return;
-  if(run.status==='success') toast('任务已完成'+(run.points!=null?'，新增 '+fmt(run.points)+' 积分':'')+'。');
+  if(run.status==='success'){
+    const points=runPointsSummary(run);
+    toast('任务已完成'+(points?'，'+points:'')+'。');
+  }
   else if(run.status==='partial' || run.status==='failed' || run.status==='needs_login') toast('任务已结束：'+(RUN_STATUSES[run.status]||'请查看运行记录')+'。');
 }
 
@@ -872,16 +1023,18 @@ function renderHomeSchedule(schedule){
   const enabled=daily || boot;
   const paused=enabled && schedule.paused;
   const daemonMissing=daily && !schedule.daemonAlive;
-  const state=paused?'已暂停':daily?'每天定时':boot?'开机运行':'未启用';
+  const automatic=schedule.participation==='automatic';
+  const state=schedule.participation==='pending'?'待选择':paused?'已暂停':daily?'每天定时':boot?(automatic?'开机运行':'开机提醒'):'未启用';
   if($('homeScheduleState').textContent!==state) $('homeScheduleState').textContent=state;
   $('homeScheduleState').classList.toggle('needs_login',paused);
-  $('homeScheduleNextLabel').textContent=paused?'暂停至':daemonMissing?'下次计划':'下次运行';
+  $('homeScheduleNextLabel').textContent=paused?'暂停至':daemonMissing?'下次计划':automatic?'下次运行':'下次提醒';
   $('homeScheduleNext').textContent=paused?schedule.pauseUntil||'手动恢复':schedule.nextRun||'—';
   $('homeScheduleWarning').hidden=!daemonMissing;
   $('homeScheduleTomorrow').hidden=!enabled;
   $('homeScheduleChoose').hidden=!enabled;
   $('homeScheduleResume').hidden=!paused && !daemonMissing;
   $('homeScheduleResume').textContent=paused?'立即恢复':'恢复定时';
+  $('homeScheduleActions').hidden=!enabled;
 }
 
 function elapsedText(seconds){
@@ -903,7 +1056,7 @@ function renderRunProgress(progress){
   el.textContent=parts.join(' · ');
 }
 
-const NOTICE_TYPES={success:'完成',failed:'失败',login:'需重新登录',update:'更新',scheduler:'定时守护'};
+const NOTICE_TYPES={success:'完成',failed:'失败',login:'需重新登录',update:'更新',scheduler:'定时守护',restriction:'账号暂停',reminder:'活动提醒'};
 function setNoticeCount(unread){
   const count=$('notificationCount');
   count.hidden=!unread;
@@ -918,7 +1071,8 @@ function renderNotifications(result){
   $('notificationList').innerHTML=visible.length?visible.map(item=>{
     const body='<b>'+esc(item.title)+'</b><span class="sub"> · '+RUN_TIME.format(new Date(item.createdAt*1000))+'</span>'
       +'<p class="sub">'+esc(item.message)+'</p>';
-    return '<div class="run-entry-body">'+(item.runId
+    return '<div class="run-entry-body">'+(item.category==='reminder'
+      ?'<a class="button-link ghost" href="'+REWARDS_DASHBOARD+'" target="_blank" rel="noopener noreferrer" data-rewards-dashboard>打开微软 Rewards ↗</a>'+body:item.runId
       ?'<button class="ghost" data-notification-run="'+item.runId+'">'+body+'</button>'
       :body)+'</div>';
   }).join(''):'<div class="empty">暂无通知</div>';
@@ -926,8 +1080,9 @@ function renderNotifications(result){
 
 function renderSchedule(sc){
   if(!sc) return;
+  const automatic=sc.participation==='automatic';
   SCH_MODE = sc.mode || 'manual';
-  if(!SCH_DIRTY && Array.isArray(sc.times) && sc.times.length){
+  if(!SCH_DIRTY && !$('timeRows').contains(document.activeElement) && Array.isArray(sc.times) && sc.times.length){
     SCH_TIMES = sc.times.slice();
     SCH_GROUPS = SCH_TIMES.map(slot=>sc.groups?.[slot]||'');
   }
@@ -940,7 +1095,9 @@ function renderSchedule(sc){
   $('schCatchLimit').value = String(sc.catchUpMinutes ?? 720);
   $('schCatchLimit').disabled = $('schCatchUp').value === 'skip';
   $('schResume').hidden = !sc.paused;
-  $('schHint').textContent = sc.paused ? '定时已暂停，可以从这里或托盘菜单恢复。' : SCH_MODE==='manual'
+  $('schHint').textContent = sc.participation==='pending'?'在总览选择参与模式后，定时计划会按所选模式生效。':sc.paused ? '定时已暂停，可以从这里或托盘菜单恢复。' : !automatic
+    ? {manual:'未安排定时提醒。',daily:'到点发送 Windows 提醒，关闭面板后仍生效。',boot:'开机登录后发送 Windows 提醒。'}[SCH_MODE]
+    : SCH_MODE==='manual'
     ? '只在你点「开始任务」时执行'
     : SCH_MODE==='daily'
       ? '守护进程常驻后台，到点自动跑一次。关掉应用也会生效。'
@@ -948,7 +1105,7 @@ function renderSchedule(sc){
   const flags = ((sc.daily?'定时 ':'') + (sc.boot?'开机 ':'')).trim() || '未写入';
   const doneList = (sc.doneToday || []);
   const rows = [
-    [sc.paused ? '暂停至' : '下次运行', sc.paused ? sc.pauseUntil || '手动恢复' : sc.nextRun || '—'],
+    [sc.paused ? '暂停至' : automatic?'下次运行':'下次提醒', sc.paused ? sc.pauseUntil || '手动恢复' : sc.nextRun || '—'],
     ['今日已处理', doneList.length ? doneList.join('、') : '—'],
     ['守护进程', sc.daemonAlive ? '运行中' : '未运行'],
     ['开机启动项', flags],
@@ -959,13 +1116,24 @@ function renderSchedule(sc){
 
 function renderTimeRows(){
   const box = $('timeRows');
-  if(!box) return;
-  $('scheduleGroups').innerHTML=[...new Set((STATUS?.accounts?.items||[]).map(a=>a.group))]
-    .map(group=>'<option value="'+esc(group)+'"></option>').join('');
+  const groups=$('scheduleGroups');
+  const names=[...new Set((STATUS?.accounts?.items||[]).map(a=>a.group).filter(Boolean))];
+  const groupKey=JSON.stringify(names);
+  if(groups.dataset.rendered!==groupKey){
+    groups.dataset.rendered=groupKey;
+    groups.replaceChildren(...names.map(name=>new Option(name)));
+  }
+  const rowKey=JSON.stringify([SCH_TIMES,SCH_GROUPS]);
+  const showGroups=STATUS?.schedule?.participation==='automatic';
+  if(box.dataset.rendered===rowKey){
+    box.querySelectorAll('[data-tg]').forEach(input=>input.hidden=!showGroups);
+    return;
+  }
+  box.dataset.rendered=rowKey;
   box.innerHTML = SCH_TIMES.map((t,i)=>
     '<div class="trow"><input type="text" class="tin ttime" inputmode="numeric" maxlength="5" '
     + 'placeholder="09:10" data-ti="'+i+'" value="'+esc(t)+'">'
-    + '<input class="tin" list="scheduleGroups" maxlength="32" aria-label="运行分组" placeholder="全部账号" data-tg="'+i+'" value="'+esc(SCH_GROUPS[i])+'">'
+    + '<input class="tin" list="scheduleGroups" maxlength="32" aria-label="运行分组" placeholder="全部账号" data-tg="'+i+'" value="'+esc(SCH_GROUPS[i])+'"'+(showGroups?'':' hidden')+'>'
     + (SCH_TIMES.length>1 ? '<button class="ghost sm" data-trm="'+i+'">删除</button>' : '')
     + '</div>').join('');
 }
@@ -1061,8 +1229,12 @@ function spark(points){
 
 const RUN_SOURCES={manual:'手动',daily:'定时',boot:'开机'};
 const RUN_STATUSES={
-  running:'运行中',started:'运行中',pending:'等待运行',success:'成功',partial:'部分失败',failed:'失败',needs_login:'需重新登录',
-  skipped:'已跳过',stopped:'已停止',interrupted:'已中断',not_run:'未运行',unknown:'结果未知'
+  running:'运行中',started:'运行中',pending:'等待运行',success:'已完成',partial:'部分失败',failed:'失败',needs_login:'需重新登录',
+  restricted:'异常已暂停',held:'暂停已跳过',skipped:'已跳过',reminded:'已记录提醒',stopped:'已停止',interrupted:'已中断',not_run:'未运行',unknown:'结果未知'
+};
+const HOLD_REASONS={
+  earning_limited:'微软提示积分获取受限',verification_required:'微软要求验证身份',
+  account_restricted:'微软提示账号受限或异常',unknown:'暂停状态需要核对'
 };
 const RUN_TIME=new Intl.DateTimeFormat('zh-CN',{
   month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false
@@ -1073,8 +1245,29 @@ let historyTarget=null;
 let runLogRequest=0;
 let historyActionPending=false;
 
+function runPointsSummary(run){
+  switch(run.pointsOutcome){
+    case 'increased': return '积分净增加 '+fmt(run.points);
+    case 'decreased': return '积分净减少 '+fmt(-run.points);
+    case 'net_zero': return '积分净变化为 0';
+    case 'unchanged': return '本次未观察到积分增加';
+    case 'unavailable': return '未取得完整计分结果';
+    default: return '';
+  }
+}
+
+function accountPointsResult(account){
+  if(account.status==='success'){
+    if(account.points==null) return '未取得计分结果';
+    if(account.points===0) return '未观察到积分增加';
+  }
+  if(account.points==null || (account.points===0 && account.status==='skipped')) return '—';
+  return (account.points>0?'+':'')+fmt(account.points);
+}
+
 function runSummary(run){
-  const source=run.scheduleKind==='catch_up' ? '定时补跑' : run.scheduleKind==='retry' ? '定时重试' : RUN_SOURCES[run.source]||'任务';
+  const source=run.status==='reminded'?(run.scheduleKind==='catch_up'?'定时补提醒':(RUN_SOURCES[run.source]||'定时')+'提醒'):
+    run.scheduleKind==='catch_up' ? '定时补跑' : run.scheduleKind==='retry' ? '定时重试' : RUN_SOURCES[run.source]||'任务';
   const parts=[RUN_TIME.format(new Date(run.startedAt*1000)),source];
   if(run.scheduledAt!=null && run.scheduleKind!=='on_time'){
     parts.push('原定 '+RUN_TIME.format(new Date(run.scheduledAt*1000)));
@@ -1083,9 +1276,12 @@ function runSummary(run){
     const seconds=Math.max(0,Math.round(run.finishedAt-run.startedAt));
     parts.push(seconds<60 ? seconds+' 秒' : Math.floor(seconds/60)+' 分 '+(seconds%60)+' 秒');
   }
-  if(run.points!=null) parts.push(fmt(run.points)+' 积分');
+  const points=runPointsSummary(run);
+  if(points) parts.push(points);
   const needsLogin=run.accounts.filter(account=>account.status==='needs_login').length;
   if(needsLogin) parts.push(needsLogin+' 个账号需重新登录');
+  const held=run.accounts.filter(account=>['restricted','held'].includes(account.status)).length;
+  if(held) parts.push(held+' 个账号已暂停');
   return parts.join(' · ');
 }
 
@@ -1097,7 +1293,7 @@ function runBadge(status){
 function renderRecentRun(run){
   $('recentRunMeta').textContent=run ? runSummary(run) : '暂无运行记录';
   $('recentRunStatus').innerHTML=run ? runBadge(run.status) : '';
-  const version=run ? run.id+':'+run.status+':'+JSON.stringify(STATUS?.progress?.accounts||[]) : 'empty';
+  const version=run ? run.id+':'+run.status+':'+STATUS?.schedule?.participation+':'+JSON.stringify(STATUS?.progress?.accounts||[]) : 'empty';
   if(historyVersion!==version){
     historyVersion=version;
     if($('runHistoryDialog').open) loadRunHistory();
@@ -1105,8 +1301,9 @@ function renderRecentRun(run){
 }
 
 function historyAccountAction(account){
+  if(STATUS?.accounts?.items.some(a=>a.email===account.email&&a.taskHold)) return '';
   if(account.status==='needs_login') return 'login';
-  if(account.status==='failed') return 'retry';
+  if(account.status==='failed'&&STATUS?.schedule?.participation==='automatic') return 'retry';
   return '';
 }
 
@@ -1132,18 +1329,23 @@ async function loadRunHistory(){
         const button=action ? '<button class="ghost sm" data-run-action="'+action+'" data-email="'
           +esc(account.email)+'"'+(historyActionPending?' disabled':'')+'>'+label+'</button>' : '';
         return '<tr><td>'+esc(account.email)+'</td><td>'+runBadge(account.status)+'</td><td>'
-          +fmt(account.points)+'</td><td>'+esc(account.phase||'')+(account.phase&&button?' ':'')+button+'</td></tr>';
+          +esc(accountPointsResult(account))+'</td><td>'+esc(HOLD_REASONS[account.restriction]||account.phase||'')
+          +(account.phase&&button?' ':'')+button+'</td></tr>';
       }).join('');
       const note=run.reason ? '<p class="sub">'+esc(run.reason)+'</p>' : '';
-      const accounts=results ? '<table><thead><tr><th>账号</th><th>结果</th><th>新增积分</th><th>操作</th></tr></thead><tbody>'
+      const accounts=run.status==='reminded'?'<p class="sub">可在微软 Rewards 自行完成活动。</p><a class="button-link ghost sm" href="'+REWARDS_DASHBOARD+'" target="_blank" rel="noopener noreferrer" data-rewards-dashboard>打开微软 Rewards ↗</a>':results ? '<table><thead><tr><th>账号</th><th>任务结果</th><th>积分变化</th><th>操作</th></tr></thead><tbody>'
         +results+'</tbody></table>' : '<p class="sub">'+(run.status==='running'?'运行结束后显示账号结果':'暂无账号结果')+'</p>';
-      const retryAll=run.status!=='running'&&run.accounts.some(a=>a.status==='failed')
+      const reviewPoints=['unchanged','unavailable'].includes(run.pointsOutcome)
+        || run.accounts.some(account=>account.status==='success' && (account.points==null || account.points===0));
+      const pointsHelp=reviewPoints ? '<div class="run-points-help"><span class="sub">如需确认计分情况，请核对微软 Rewards 中对应账号的积分。</span>'
+        +'<a class="button-link ghost sm" href="https://rewards.bing.com/dashboard" target="_blank" rel="noopener noreferrer" data-rewards-dashboard>打开微软 Rewards ↗</a></div>' : '';
+      const retryAll=run.status!=='running'&&run.accounts.some(a=>historyAccountAction(a)==='retry')
         ?'<button class="ghost sm" data-run-action="retry-all"'+(historyActionPending?' disabled':'')+'>重试失败账号</button>':'';
-      const logButton=run.scheduleKind==='skipped' ? '' : '<div class="run-entry-actions">'
+      const logButton=run.scheduleKind==='skipped' || run.status==='reminded' || (run.status==='skipped'&&run.reason) ? '' : '<div class="run-entry-actions">'
         +retryAll+'<button class="ghost sm" data-run-action="log">查看本次日志</button></div>';
       return '<details class="run-entry" data-run="'+id+'"'+(open?' open':'')+'><summary>'
         +runBadge(run.status)+'<span class="k">'+esc(runSummary(run))+'</span></summary><div class="run-entry-body">'
-        +note+accounts+logButton+'</div></details>';
+        +note+accounts+pointsHelp+logButton+'</div></details>';
     }).join('') || '<div class="empty">最近 7 天暂无运行记录</div>';
     if(target!==null){
       const entry=list.querySelector('[data-run="'+target+'"]');
@@ -1196,6 +1398,7 @@ function historyFeedback(message){
 }
 
 $('runHistoryList').onclick=async event=>{
+  if(event.target.closest('[data-rewards-dashboard]')) return openRewardsPage(event,'dashboard');
   const button=event.target.closest('button[data-run-action]');
   if(!button) return;
   const entry=button.closest('.run-entry');
@@ -1205,6 +1408,7 @@ $('runHistoryList').onclick=async event=>{
     return;
   }
   if(historyActionPending) return;
+  if(action!=='login' && !await confirmRisk()) return;
   historyActionPending=true;
   const accountButtons=()=>$('runHistoryList').querySelectorAll('button[data-email],button[data-run-action=retry-all]');
   accountButtons().forEach(button=>button.disabled=true);
@@ -1286,11 +1490,60 @@ function renderHome(d){
 
   $('dot').className='dot'+(d.running?' on':'');
   $('stateText').textContent = d.running ? (d.pid?'运行中 '+d.pid:'运行中') : '空闲';
-  if(!BUSY){ $('btnRun').disabled=d.running; $('btnStop').disabled=!d.running; }
+  if(!BUSY){
+    $('btnRun').disabled=d.running && d.schedule?.participation==='automatic';
+    $('btnStop').disabled=!d.running;
+  }
+}
+
+const ACCOUNT_FILTER_IDS=['accRegion','accLoginState','accFailure','accGroup'];
+let renderedAccountCards='';
+
+function updateAccountCards(markup){
+  if(renderedAccountCards===markup) return;
+  renderedAccountCards=markup;
+  const grid=$('accGrid');
+  const active=document.activeElement;
+  const focused=grid.contains(active)?active:null;
+  const cards=new Map([...grid.children].map(card=>[card.dataset.email,card]));
+  const template=document.createElement('template');
+  template.innerHTML=markup;
+  let position=grid.firstElementChild;
+  for(const incoming of [...template.content.children]){
+    const email=incoming.dataset.email;
+    const existing=cards.get(email);
+    const card=existing||incoming;
+    if(existing){
+      cards.delete(email);
+      card.className=incoming.className;
+      [...card.children].forEach((part,index)=>{
+        const next=incoming.children[index];
+        if(!part.isEqualNode(next)) part.replaceWith(next.cloneNode(true));
+      });
+    }
+    if(card!==position) grid.insertBefore(card,position);
+    position=card.nextElementSibling;
+  }
+  cards.forEach(card=>card.remove());
+  if(focused && document.activeElement!==focused){
+    const replacement=[...grid.querySelectorAll('button[data-act]')].find(button=>
+      button.dataset.email===focused.dataset.email && button.dataset.act===focused.dataset.act && !button.disabled);
+    (replacement||$('accSearch')).focus({preventScroll:true});
+  }
 }
 
 function renderAccounts(acc, running){
   const raw=(acc&&acc.items)||[];
+  for(const [id,key,label] of [['accGroup','group','全部分组'],['accRegion','geo','全部地区']]){
+    const select=$(id), options=[...new Set(raw.map(a=>a[key]).filter(Boolean))].sort();
+    const signature=JSON.stringify(options);
+    if(select.dataset.signature!==signature){
+      select.dataset.signature=signature;
+      const previous=select.value;
+      select.replaceChildren(new Option(label,''),...options.map(value=>new Option(value,value)));
+      if(options.includes(previous)) select.value=previous;
+    }
+  }
   let items=raw;
   const q=($('accSearch')&&$('accSearch').value||'').trim().toLowerCase();
   if(q) items=items.filter(a=>a.email.toLowerCase().includes(q)||(a.alias||'').toLowerCase().includes(q));
@@ -1307,22 +1560,12 @@ function renderAccounts(acc, running){
   else if(sortBy==='failure') items=items.slice().sort((a,b)=>(b.lastFailure||0)-(a.lastFailure||0));
   else if(sortBy==='email') items=items.slice().sort((a,b)=>a.email.localeCompare(b.email));
   const allItems=raw;
-  for(const [id,key,label] of [['accGroup','group','全部分组'],['accRegion','geo','全部地区']]){
-    const select=$(id), options=[...new Set(allItems.map(a=>a[key]))].sort();
-    const signature=JSON.stringify(options);
-    if(select.dataset.signature!==signature){
-      select.dataset.signature=signature;
-      const previous=select.value;
-      select.innerHTML='<option value="">'+label+'</option>'+options.map(value=>'<option value="'+esc(value)+'">'+esc(value)+'</option>').join('');
-      if(options.includes(previous)) select.value=previous;
-    }
-  }
   const sel=$('accPick');
-  const sig=allItems.map(a=>a.email+(a.active?'*':'')+(a.enabled?'':'!')).join('|');
+  const sig=allItems.map(a=>a.email+(a.active?'*':'')+(a.enabled?'':'!')+(a.taskHold?'^':'')).join('|');
   if(sel.dataset.sig!==sig){
     sel.dataset.sig=sig;
     sel.innerHTML=allItems.length
-      ? allItems.map(a=>'<option value="'+esc(a.email)+'"'+(a.active?' selected':'')+'>'+(a.enabled?'':'（停用）')+esc(a.alias)+'</option>').join('')
+      ? allItems.map(a=>'<option value="'+esc(a.email)+'"'+(a.active?' selected':'')+'>'+(a.taskHold?'（已暂停）':a.enabled?'':'（停用）')+esc(a.alias)+'</option>').join('')
       : '<option value="">无账号</option>';
   }
   sel.disabled=running||!allItems.length;
@@ -1331,15 +1574,17 @@ function renderAccounts(acc, running){
     +(items.length?' · 今日合计 +'+fmt(items.reduce((sum,account)=>sum+account.points,0)):'');
   $('accEmpty').textContent=allItems.length?'没有符合筛选条件的账号。':'还没有账号。点「添加账号」，在弹出的窗口里登录一次。';
   $('btnAdd').disabled=running;
-  $('accGrid').innerHTML=items.map(a=>{
+  const activeFilters=ACCOUNT_FILTER_IDS.filter(id=>$(id).value).length;
+  $('accountFilters').textContent=activeFilters?'筛选（'+activeFilters+'）':'筛选';
+  updateAccountCards(items.map(a=>{
     const initial=(a.alias||a.email).slice(0,1).toUpperCase();
-    const sessionLabel=a.needsLogin?'需重新登录':a.loggedIn?'已登录':'未登录';
+    const sessionLabel=a.taskHold?'任务已暂停':a.needsLogin?'需重新登录':a.loggedIn?'已登录':'未登录';
     const loginLabel=a.needsLogin?'重新登录':a.loggedIn?'重登':'登录';
-    const sessionColor=a.loggedIn?'var(--green)':'var(--amber)';
-    return '<div class="acc'+(a.active?' cur':'')+'">'
+    const sessionColor=a.loggedIn&&!a.taskHold?'var(--green)':'var(--amber)';
+    return '<div class="acc'+(a.active?' cur':'')+'" data-email="'+esc(a.email)+'">'
       +'<div class="top"><div class="av">'+esc(initial)+'</div>'
       +'<div style="min-width:0"><div class="nm">'+esc(a.alias)+(a.active?'<span class="tag">当前</span>':'')+'</div>'
-      +'<div class="em">'+esc(a.email)+'<span class="account-status" style="color:'+sessionColor+'">'+sessionLabel+'</span></div></div></div>'
+      +'<div class="em">'+esc(a.email)+'<span class="account-status" style="color:'+sessionColor+'" title="'+esc(HOLD_REASONS[a.taskHold]||'')+'">'+sessionLabel+'</span></div></div></div>'
       +'<dl class="meta">'
       +'<div><dt>当前余额</dt><dd class="account-balance" title="'+esc(a.balanceAt
         ? (a.balanceSource==='online'?'在线同步':'任务日志')+' · '+RUN_TIME.format(new Date(a.balanceAt*1000))
@@ -1349,11 +1594,13 @@ function renderAccounts(acc, running){
       +'</dl><div class="acts">'
       +(a.active?'':'<button class="sm" data-act="switch" data-email="'+esc(a.email)+'">切换</button>')
       +'<button class="sm" data-act="edit" data-email="'+esc(a.email)+'">编辑</button>'
-      +'<button class="sm" data-act="login" data-email="'+esc(a.email)+'">'+loginLabel+'</button>'
+      +(a.taskHold
+        ? '<button class="sm" data-act="resume-tasks" data-email="'+esc(a.email)+'"'+(running?' disabled':'')+'>恢复任务</button>'
+        : '<button class="sm" data-act="login" data-email="'+esc(a.email)+'">'+loginLabel+'</button>')
       +'<button class="sm" data-act="toggle" data-email="'+esc(a.email)+'" data-on="'+(a.enabled?1:0)+'">'+(a.enabled?'停用':'启用')+'</button>'
       +'<button class="sm" data-act="remove" data-email="'+esc(a.email)+'">删除</button>'
       +'</div></div>';
-  }).join('');
+  }).join(''));
 }
 
 function detailRows(){
@@ -1544,12 +1791,18 @@ let updateOffer=null, updateTransfer={state:'idle'}, updateStarting=false, updat
 
 function renderUpdateTransfer(){
   const active=['downloading','verifying'].includes(updateTransfer.state);
+  const installing=updateTransfer.state==='installing';
   const ready=updateTransfer.state==='ready';
+  const installResult=$('updateInstallResult');
+  installResult.hidden=!updateTransfer.installResult?.msg;
+  installResult.textContent=updateTransfer.installResult?.msg || '';
+  $('installUpdate').hidden=!ready || !desktopMode || !updateTransfer.rollback;
+  $('checkUpdate').disabled=installing;
   const failed=updateTransfer.state==='failed';
   const sameVersion=updateOffer?.tag===updateTransfer.tag;
   const button=$('downloadUpdate');
   button.hidden=!updateOffer?.canDownload || (ready && sameVersion);
-  button.disabled=active || updateStarting;
+  button.disabled=active || updateStarting || installing;
   button.textContent=failed && sameVersion?'重试下载':'下载新版 ZIP';
   $('updateTransfer').hidden=updateTransfer.state==='idle';
   $('updateGuide').hidden=!ready;
@@ -1576,6 +1829,8 @@ function renderUpdateTransfer(){
       ? '已创建升级恢复点。需要回退时，退出程序后运行 Restore-Previous.exe。'
       : updateTransfer.rollbackError?'创建恢复点失败：'+updateTransfer.rollbackError:'';
     loadSelf();
+  }else if(installing){
+    status.textContent='正在退出面板并安装更新。完成后会自动打开新版。';
   }else if(failed){
     status.textContent=updateTransfer.msg || '下载失败，请重试。';
   }
@@ -1646,6 +1901,24 @@ $('downloadUpdate').onclick=async()=>{
   }finally{
     updateStarting=false;
     renderUpdateTransfer();
+  }
+};
+
+$('installUpdate').onclick=async()=>{
+  if(!await dialog({title:'安装新版',desc:'更新将退出面板、停止定时守护并保留 data 目录。完成后会打开新版。',input:false,ok:'安装并重启'})) return;
+  const button=$('installUpdate');
+  button.disabled=true;
+  try{
+    const result=await post('/api/update/install',{});
+    if(!result.ok) toast(result.msg || '无法开始更新');
+    else{
+      updateTransfer={state:'installing'};
+      renderUpdateTransfer();
+    }
+  }catch(error){
+    toast('无法开始更新，请重试');
+  }finally{
+    button.disabled=false;
   }
 };
 
@@ -1811,7 +2084,7 @@ $('btnClean').onclick=async()=>{
 };
 
 document.addEventListener('keydown', e=>{
-  if(e.ctrlKey && e.key==='Enter'){
+  if(e.ctrlKey && e.key==='Enter' && !$('participationDialog').open){
     e.preventDefault();
     if(STATUS && STATUS.running) $('btnStop').click(); else $('btnRun').click();
   }
@@ -1840,6 +2113,7 @@ $('noticePreferences').onchange=()=>{
   noticeAction('preferences',{muted});
 };
 $('notificationList').onclick=e=>{
+  if(e.target.closest('[data-rewards-dashboard]')) return openRewardsPage(e,'dashboard');
   const button=e.target.closest('[data-notification-run]');
   if(!button) return;
   const runId=Number(button.dataset.notificationRun);
@@ -1886,16 +2160,21 @@ $('keepInTray').onchange=async e=>{
 
 const desktopMode=new URLSearchParams(location.search).get('desktop')==='1';
 const statusUrl=desktopMode ? '/api/status?desktop=1' : '/api/status';
-if(desktopMode){
-  $('redeemRewards').onclick=async event=>{
-    event.preventDefault();
-    try{
-      const result=await post('/api/rewards/redeem',{});
-      if(result.ok) return;
-    }catch(error){}
-    toast('无法打开兑换页，请稍后重试。');
-  };
+
+async function openRewardsPage(event,page){
+  if(!desktopMode){
+    if(!event.target.closest('a')) window.open(REWARDS_DASHBOARD,'_blank','noopener,noreferrer');
+    return;
+  }
+  event.preventDefault();
+  try{
+    const result=await post('/api/rewards/'+page,{});
+    if(result.ok) return;
+  }catch(error){}
+  toast('无法打开微软 Rewards 页面，请稍后重试。');
 }
+
+$('redeemRewards').onclick=event=>openRewardsPage(event,'redeem');
 
 async function tick(){
   try{
@@ -1905,6 +2184,7 @@ async function tick(){
       openRunHistory(d.windowRun);
     }
     STATUS=d;
+    renderParticipation(d.schedule,d.runningBy==='process'||d.runningBy==='task');
     setNoticeCount(d.noticeCount||0);
     renderRunProgress(d.progress);
     notifyRunFinished(d.latestRun);
@@ -1939,7 +2219,9 @@ async function doLogin(email, endpoint='/api/accounts/login', feedback=toast){
 
 document.querySelectorAll('.navitem').forEach(n=>n.onclick=()=>nav(n.dataset.nav));
 
-$('btnRun').onclick=async()=>{
+$('btnRun').onclick=async event=>{
+  if(STATUS?.schedule?.participation!=='automatic') return openRewardsPage(event,'dashboard');
+  if(!await confirmRisk()) return;
   BUSY=true; $('btnRun').disabled=true;
   const only = $('onlyActive').checked && STATUS && STATUS.accounts ? STATUS.accounts.active : null;
   const d=await post('/api/run', only ? {only} : {});
@@ -1954,6 +2236,8 @@ $('btnStop').onclick=async()=>{
 };
 
 $('btnAdd').onclick=async()=>{
+  if(!STATUS) await tick();
+  if(STATUS?.accounts?.items.length && !await confirmRisk()) return;
   const email=await dialog({
     title:'添加账号',
     desc:'输入要登录的微软账号邮箱。随后会弹出登录窗口，在里面正常登录即可（验证码、手机批准都行）。会话会被记住，以后不用再输密码。',
@@ -1965,6 +2249,7 @@ $('btnAdd').onclick=async()=>{
 };
 
 $('btnReloginNeeded').onclick=async()=>{
+  closeAccountBulk(true);
   const items=(STATUS&&STATUS.accounts&&STATUS.accounts.items)||[];
   const targets=items.filter(account=>account.enabled&&account.needsLogin);
   if(!targets.length) return toast('没有需要重新登录的账号');
@@ -1988,6 +2273,13 @@ $('accGrid').onclick=async e=>{
     const a=list.find(x=>x.email===email);
     if(a) openEditor(a);
     return;
+  }
+  if(act==='resume-tasks'){
+    const yes=await dialog({title:'恢复账号任务',desc:'请先到微软官网确认账号可以正常使用。确认后，此账号会重新参与已启用的任务和定时计划。',input:false,ok:'我已确认，恢复任务'});
+    if(!yes) return;
+    const result=await post('/api/accounts/resume-tasks',{email,confirmed:true});
+    toast(result.ok?'已恢复账号任务':result.msg||'恢复失败');
+    return tick();
   }
   if(act==='login') return doLogin(email);
   if(act==='switch'){ const d=await post('/api/accounts/switch',{email}); toast(d.ok?'已切换':'切换失败'); return tick(); }
@@ -2057,6 +2349,38 @@ $('segMode').onclick=e=>{
   $('timeRow').style.display = SCH_MODE==='daily' ? 'block' : 'none';
 };
 
+$('homeParticipation').onclick=()=>{
+  $('participationError').hidden=true;
+  $('participationDialog').showModal();
+};
+
+$('participationMode').onclick=async event=>{
+  const mode=event.target.closest('button')?.dataset.participation;
+  if(!mode || participationSwitchPending || STATUS?.schedule?.participation===mode) return;
+  const errorText=$('participationError');
+  errorText.hidden=true;
+  const running=()=>['process','task'].includes(STATUS?.runningBy);
+  participationSwitchPending=true;
+  renderParticipation(STATUS?.schedule,running());
+  try{
+    if(mode==='automatic' && !await confirmRisk()) return;
+    const result=await post('/api/participation',{mode});
+    if(!result.ok) throw new Error(result.msg||'无法保存参与模式');
+    if(STATUS?.schedule) STATUS.schedule.participation=result.participation||mode;
+    await tick();
+    renderTimeRows();
+    $('participationDialog').close();
+    toast(mode==='automatic'?'已启用自动任务':'已切换到仅查看与提醒');
+  }catch(error){
+    errorText.textContent=error.message||'无法保存参与模式';
+    errorText.hidden=false;
+  }finally{
+    participationSwitchPending=false;
+    renderParticipation(STATUS?.schedule,running());
+    if(!$('participationDialog').open) $('homeParticipation').focus();
+  }
+};
+
 $('schSave').onclick=async()=>{
   const mode=SCH_MODE;
   const times=SCH_TIMES;
@@ -2080,10 +2404,11 @@ $('schSave').onclick=async()=>{
     payload.catchUpMode=catchUpMode;
     if(catchUpMode==='latest') payload.catchUpMinutes=catchUpMinutes;
   }
+  if(mode!=='manual' && STATUS?.schedule?.participation==='automatic' && !await confirmRisk()) return;
   const d=await post('/api/schedule',payload);
   if(!d.ok) return toast(d.msg||'保存失败');
   SCH_DIRTY=false;
-  toast(mode==='manual'?'已关闭自动运行':(mode==='daily'?'已设为每天 '+times.join('、'):'已设为开机自动'));
+  toast(mode==='manual'?'已关闭定时计划':(mode==='daily'?'已设为每天 '+times.join('、'):d.participation==='automatic'?'已设为开机自动':'已设为开机提醒'));
   renderSchedule(d); tick();
 };
 
@@ -2092,14 +2417,7 @@ $('schCatchUp').onchange=()=>{
   $('schCatchLimit').disabled=$('schCatchUp').value==='skip';
 };
 $('schCatchLimit').oninput=()=>{SCH_DIRTY=true;};
-
-$('schRunNow').onclick=async()=>{
-  BUSY=true;
-  const d=await post('/api/run');
-  BUSY=false;
-  toast(d.ok?'任务已启动':'启动失败：'+(d.msg||''));
-  setTimeout(tick,900);
-};
+$('schRetry').onchange=$('schWeekday').onchange=()=>{SCH_DIRTY=true;};
 
 let THEME='light';
 function applyTheme(t, animate, persist=true){
@@ -2191,10 +2509,37 @@ document.getElementById('setTabs').onclick=e=>{
   const t=e.target.closest('.tab'); if(!t) return;
   document.querySelectorAll('#setTabs .tab').forEach(x=>x.classList.toggle('on',x===t));
   document.querySelectorAll('.pane').forEach(p=>p.classList.toggle('on',p.dataset.pane===t.dataset.tab));
+  $('taskConfigActions').hidden=t.dataset.tab==='t3';
 };
+
+function closeAccountBulk(restoreFocus=false){
+  const bulk=$('accountBulk');
+  if(!bulk.open) return;
+  bulk.open=false;
+  if(restoreFocus) bulk.querySelector('summary').focus();
+}
+
+function setAccountFiltersOpen(open){
+  $('accountFilters').setAttribute('aria-expanded',String(open));
+  $('accountFilterFields').hidden=!open;
+}
+
+$('accountFilters').onclick=()=>setAccountFiltersOpen($('accountFilterFields').hidden);
+$('accountFilterFields').onkeydown=event=>{
+  if(event.key!=='Escape') return;
+  setAccountFiltersOpen(false);
+  $('accountFilters').focus();
+};
+$('accountBulk').onkeydown=event=>{
+  if(event.key==='Escape') closeAccountBulk(true);
+};
+document.addEventListener('click',event=>{
+  if(!$('accountBulk').contains(event.target)) closeAccountBulk();
+});
 
 document.querySelectorAll('[data-bulk]').forEach(b=>{
   b.onclick = async () => {
+    closeAccountBulk(true);
     const act = b.dataset.bulk;
     const label = {enable_all:'全部启用', disable_all:'全部停用', remove_disabled:'清理停用'}[act] || act;
     const d = await post('/api/accounts/bulk', {action: act});
@@ -2205,7 +2550,7 @@ document.querySelectorAll('[data-bulk]').forEach(b=>{
 
 $('accSearch').oninput = () => { if(STATUS) renderAccounts(STATUS.accounts, STATUS.running); };
 $('accSort').onchange = () => { if(STATUS) renderAccounts(STATUS.accounts, STATUS.running); };
-$('accFailure').onchange = $('accRegion').onchange = $('accLoginState').onchange = $('accGroup').onchange = () => { if(STATUS) renderAccounts(STATUS.accounts, STATUS.running); };
+ACCOUNT_FILTER_IDS.forEach(id=>$(id).onchange=()=>{ if(STATUS) renderAccounts(STATUS.accounts,STATUS.running); });
 $('dSearch').oninput = () => renderDetail(STATUS);
 $('dOnlyGain').onchange = () => renderDetail(STATUS);
 $('dExport').onclick = exportCsv;
@@ -2250,9 +2595,8 @@ $('schAddTime').onclick = () => {
 };
 $('schSkip').onclick = async () => {
   const d = await post('/api/schedule/skip');
-  SCH_DIRTY = false;
   toast(d.ok ? '今天不再自动运行' : (d.msg||'操作失败'));
-  renderSchedule(d);
+  if(d.ok) await tick();
 };
 async function setSchedulePause(paused, until, feedback=toast){
   if(SCHEDULE_PAUSE_BUSY) return false;

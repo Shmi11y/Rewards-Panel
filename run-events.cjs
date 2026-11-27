@@ -14,7 +14,7 @@ const PHASES = {
     'PUNCH-CARDS': '打卡活动',
 };
 
-function observe(eventsDir, accounts) {
+function observe(eventsDir, emails) {
     if (!eventsDir) return;
     const eventsPath = path.join(eventsDir, `${process.pid}.jsonl`);
     function emit(event) {
@@ -26,11 +26,11 @@ function observe(eventsDir, accounts) {
         }
     }
 
-    if (cluster.isPrimary) emit({type: 'accounts', emails: accounts.map(account => account.email)});
+    if (cluster.isPrimary) emit({type: 'accounts', emails});
     const loggerPath = path.join(__dirname, 'app', 'dist', 'logging', 'Logger.js');
-    if (!fs.existsSync(loggerPath)) return;
+    if (!fs.existsSync(loggerPath)) return emit;
     const { Logger } = require(loggerPath);
-    if (typeof Logger?.prototype?.baseLog !== 'function') return;
+    if (typeof Logger?.prototype?.baseLog !== 'function') return emit;
 
     const baseLog = Logger.prototype.baseLog;
     const active = new WeakMap();
@@ -76,6 +76,7 @@ function observe(eventsDir, accounts) {
         }
         return baseLog.call(this, level, platform, tag, message, color);
     };
+    return emit;
 }
 
 module.exports = { observe };

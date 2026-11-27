@@ -53,10 +53,11 @@ if SOURCE_ROOT not in sys.path:
 import accounts as acct
 import balance
 import schedule as sched_mod
+import account_holds
 import run_history
 import diagnostics
 import updates
-from windows_notifications import valid_run_id
+from windows_notifications import REWARDS_DASHBOARD, valid_run_id
 
 SESSION_DB = DATA_DIR / "sessions" / "sessions.db"
 CONFIG_FILE = DATA_DIR / "config.json"
@@ -233,6 +234,11 @@ def save_prefs(patch: dict) -> None:
         stored = _read_prefs()
         stored.update(patch)
         _write_settings(PREFS_FILE, stored)
+
+
+def risk_acknowledged() -> bool:
+    with _prefs_lock:
+        return _read_prefs().get("riskAcknowledged") is True
 
 
 def set_prefs(patch: dict) -> dict:
@@ -623,6 +629,7 @@ _cache = {"key": None, "data": None}
 _ui_state: dict = {}
 _local_close = None   # 由桌面外壳注入，用于关闭窗口
 _local_open = None
+_local_exit = None
 _window_run_lock = threading.Lock()
 _window_run: int | None = None
 _stop_mark: float = 0.0   # 上次手动停止时日志的 mtime，用来压掉"刚跑完仍显示运行中"
@@ -926,6 +933,7 @@ def build_status() -> dict:
         "env": env_summary(),
         "accounts": accounts,
         "schedule": schedule,
+        "riskAcknowledged": risk_acknowledged(),
         "ui": dict(_ui_state),
         "cacheBytes": cache_size(),
         "latestRun": active_run or (latest[0] if latest else None),
@@ -946,6 +954,8 @@ def build_status() -> dict:
 def start_run(only: str | list[str] | None = None, *, retry_account: bool = False) -> dict:
     global _proc
     with _lock:
+        if run_history.participation(DATA_DIR) != "automatic":
+            return {"ok": False, "msg": "当前仅查看和提醒，请到微软 Rewards 完成活动"}
         if _proc is not None and _proc.poll() is None:
             return {"ok": False, "msg": "已经在运行中"}
         # 定时守护可能已经拉起任务，避免同时跑两份抢同一个账号
@@ -957,6 +967,9 @@ def start_run(only: str | list[str] | None = None, *, retry_account: bool = Fals
         if only:
             try:
                 emails = [only] if isinstance(only, str) else only
+                emails = [email for email in emails if not account_holds.get(DATA_DIR, email)]
+                if not emails:
+                    return {"ok": False, "msg": "所选账号已暂停，请到微软官网确认后手动恢复"}
                 target_env = acct.child_env_for_accounts(emails)
             except OSError:
                 return {"ok": False, "msg": "无法读取账号配置"}
@@ -999,8 +1012,9 @@ def run_account_action(run_id: str, action: str, body) -> dict:
         if run["status"] == "running" or not emails:
             return {"ok": False, "msg": "本次运行没有可重试的失败账号"}
         enabled = {row["email"].casefold() for row in acct.load()["accounts"] if row.get("enabled", True)}
-        targets = [email for email in emails if email.casefold() in enabled]
-        return start_run(targets, retry_account=True) if targets else {"ok": False, "msg": "失败账号已移除或停用"}
+        targets = [email for email in emails if email.casefold() in enabled
+                   and not account_holds.get(DATA_DIR, email)]
+        return start_run(targets, retry_account=True) if targets else {"ok": False, "msg": "失败账号已移除、停用或暂停"}
     expected = "needs_login" if action == "login" else "failed"
     if run["status"] == "running" or not any(
         row["email"] == email and row["status"] == expected for row in run["accounts"]
@@ -1236,18 +1250,45 @@ class Handler(BaseHTTPRequestHandler):
         except Exception:
             body = {}
 
-        if self.path == "/api/settings/backup":
+        if self.path != "/api/update/install" and UPDATE_DOWNLOADS.installing():
+            result = {"ok": False, "msg": "正在安装更新，请等待面板重新打开"}
+        elif self.path == "/api/settings/backup":
             result = import_settings(body)
         elif self.path == "/api/update/download":
             result = UPDATE_DOWNLOADS.start(body.get("tag") if isinstance(body, dict) else None)
+        elif self.path == "/api/update/install":
+            if not _local_exit:
+                result = {"ok": False, "msg": "请从便携版桌面窗口启动更新"}
+            elif run_state() in {"process", "task"} or acct.login_in_progress():
+                result = {"ok": False, "msg": "请等待任务或账号登录完成后再更新"}
+            else:
+                result = UPDATE_DOWNLOADS.install()
+                if result["ok"]:
+                    threading.Timer(0.4, _local_exit).start()
         elif self.path == "/api/update/open-folder":
             result = UPDATE_DOWNLOADS.open_folder()
-        elif self.path == "/api/rewards/redeem":
+        elif self.path in {"/api/rewards/dashboard", "/api/rewards/redeem"}:
             try:
-                os.startfile("https://rewards.bing.com/redeem")
+                os.startfile("https://rewards.bing.com/redeem" if self.path.endswith("/redeem") else REWARDS_DASHBOARD)
                 result = {"ok": True}
             except OSError:
-                result = {"ok": False, "msg": "无法打开兑换页，请稍后重试。"}
+                result = {"ok": False, "msg": "无法打开微软 Rewards 页面，请稍后重试。"}
+        elif self.path == "/api/risk/acknowledge":
+            if not isinstance(body, dict) or body.get("confirmed") is not True:
+                result = {"ok": False, "msg": "请先确认已阅读使用风险"}
+            else:
+                try:
+                    save_prefs({"riskAcknowledged": True})
+                    result = {"ok": True}
+                except OSError:
+                    result = {"ok": False, "msg": "无法保存风险确认，请检查数据目录权限"}
+        elif self.path == "/api/participation":
+            mode = body.get("mode") if isinstance(body, dict) else None
+            if mode == "automatic" and not risk_acknowledged():
+                result = {"ok": False, "msg": "请先确认自动任务的使用风险"}
+            else:
+                with _lock:
+                    result = run_history.set_participation(DATA_DIR, mode)
         elif match := re.fullmatch(r"/api/runs/([^/]+)/(login|retry|retry-all)", self.path):
             result = run_account_action(match[1], match[2], body)
         elif self.path == "/api/run":
@@ -1258,6 +1299,16 @@ class Handler(BaseHTTPRequestHandler):
                 result = {"ok": False, "msg": "账号参数不合法"}
         elif self.path == "/api/stop":
             result = stop_run()
+        elif self.path == "/api/accounts/resume-tasks":
+            email = body.get("email") if isinstance(body, dict) else None
+            if not isinstance(email, str) or body.get("confirmed") is not True:
+                result = {"ok": False, "msg": "请先在微软官网确认账号状态"}
+            else:
+                with _lock:
+                    if run_state() in {"process", "task"}:
+                        result = {"ok": False, "msg": "请等待当前运行结束后再恢复账号"}
+                    else:
+                        result = acct.resume_task_account(email)
         elif self.path == "/api/accounts/login":
             result = acct.start_login(str(body.get("email", "")))
         elif self.path == "/api/accounts/update":

@@ -86,7 +86,7 @@ def trigger(reason: str, *, slot: int, kind: str) -> int:
     env = dict(os.environ, REWARDS_DATA_DIR=str(DATA))
     slot_name = datetime.fromtimestamp(slot).strftime("%H:%M")
     group = schedule.load()["groups"].get(slot_name)
-    if group:
+    if group and run_history.participation(DATA) == "automatic":
         from panel import accounts
 
         targets = accounts.group_emails(group)
@@ -173,6 +173,7 @@ def _loop() -> None:
             try:
                 now = datetime.now()
                 sched = schedule.load(now=now.timestamp())
+                automatic = run_history.participation(DATA) == "automatic"
                 mode = "manual" if sched["paused"] else sched["mode"]
                 retry_left = max(0, min(MAX_RETRY, int(sched.get("retry", 0) or 0)))
 
@@ -211,7 +212,9 @@ def _loop() -> None:
                     if elapsed > RETRY_AFTER:
                         moved = log_mtime() > pending["mtime"]
                         alive = task_running()
-                        if not moved and not alive and pending["left"] > 0:
+                        quiet = not moved and not alive
+                        finished = quiet and run_history.scheduled_run_finished(DATA, pending["slot"])
+                        if automatic and quiet and not finished and pending["left"] > 0:
                             pending["left"] -= 1
                             pending["tries"] += 1
                             log(f"重试 {pending['tries']} 次：{pending['slot']} 触发后无日志输出")
@@ -219,7 +222,7 @@ def _loop() -> None:
                             trigger("定时重试", slot=pending["slot"], kind="retry")
                             pending["at"] = time.time()
                         else:
-                            if not moved and not alive:
+                            if automatic and quiet and not finished:
                                 log(f"放弃重试：{pending['slot']} 无输出且已无重试次数")
                             pending = None
 

@@ -29,7 +29,7 @@ ROOT = Path(__file__).resolve().parent
 # The portable Python's ._pth file excludes the script directory.
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
-from windows_notifications import AUMID, parse_activation, register_shortcut, run_scheme
+from windows_notifications import AUMID, REWARDS_DASHBOARD, parse_activation, register_shortcut, run_scheme
 
 ACTIVATION = parse_activation(sys.argv[1:]) if __name__ == "__main__" and len(sys.argv) > 1 else None
 if __name__ == "__main__" and len(sys.argv) > 1 and ACTIVATION is None:
@@ -129,11 +129,12 @@ def keep_in_tray() -> bool:
     return api("/api/prefs", timeout=2).get("keepInTray") is True
 
 
-def bind_window_actions(open_panel, close_panel) -> None:
+def bind_window_actions(open_panel, close_panel, exit_app) -> None:
     import server
 
     server._local_open = open_panel
     server._local_close = close_panel
+    server._local_exit = exit_app
 
 
 def make_tray(open_panel, open_pause_picker, exit_app):
@@ -150,8 +151,15 @@ def make_tray(open_panel, open_pause_picker, exit_app):
             _log(msg)
             ctypes.windll.user32.MessageBoxW(0, msg, TITLE, 0x30)
 
+    def open_rewards() -> None:
+        try:
+            os.startfile(REWARDS_DASHBOARD)
+        except OSError as exc:
+            _log(f"无法打开微软 Rewards: {exc}")
+            ctypes.windll.user32.MessageBoxW(0, "无法打开微软 Rewards，请检查默认浏览器设置。", TITLE, 0x30)
+
     return Tray(ICO, open_panel, lambda: api("/api/schedule", timeout=2),
-                pause_schedule, open_pause_picker, exit_app, _log)
+                pause_schedule, open_pause_picker, exit_app, _log, open_rewards=open_rewards)
 
 
 def ensure_shortcut() -> None:
@@ -457,7 +465,7 @@ def fallback_chromium() -> int:
         wake.set()
 
     tray = make_tray(open_panel, open_pause_picker, exit_app)
-    bind_window_actions(open_panel, close_panel)
+    bind_window_actions(open_panel, close_panel, exit_app)
     code = 0
     try:
         while not STATE["quitting"]:
@@ -615,7 +623,7 @@ def run_desktop(existing: bool) -> int:
         _log(f"关闭事件注册失败: {exc}")
 
     try:
-        webview.start(lambda: bind_window_actions(open_panel, api_obj.close))
+        webview.start(lambda: bind_window_actions(open_panel, api_obj.close, exit_app))
     except Exception as exc:  # noqa: BLE001
         _log(f"桌面窗口启动失败（{exc}），改用内置浏览器窗口")
         if tray:

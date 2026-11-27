@@ -5,6 +5,8 @@ import hashlib
 import json
 import os
 import re
+import shutil
+import subprocess
 import tempfile
 import threading
 from dataclasses import dataclass
@@ -248,6 +250,7 @@ class UpdateDownloads:
         self._lock = threading.Lock()
         self._asset: Asset | None = None
         self._saved: Path | None = None
+        self._verified: Asset | None = None
         self._state = {"state": "idle"}
 
     def check(self, current: str | None) -> dict:
@@ -258,16 +261,22 @@ class UpdateDownloads:
 
     def status(self) -> dict:
         with self._lock:
-            return dict(self._state)
+            result = dict(self._state)
+            try:
+                result["installResult"] = json.loads((self.folder / "install-result.json").read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                pass
+            return result
 
     def start(self, tag) -> dict:
         with self._lock:
             asset = self._asset
-            if self._state["state"] in {"downloading", "verifying"}:
+            if self._state["state"] in {"downloading", "verifying", "installing"}:
                 return {"ok": False, "msg": "已有更新包正在下载"}
             if asset is None or tag != asset.tag:
                 return {"ok": False, "msg": "请重新检查更新，获取可校验的下载包"}
             self._saved = None
+            self._verified = None
             self._state = {"state": "downloading", "tag": tag, "received": 0, "total": asset.size}
             try:
                 threading.Thread(target=self._download, args=(asset,), daemon=True).start()
@@ -319,6 +328,7 @@ class UpdateDownloads:
                     recovery_error = str(error)
             with self._lock:
                 self._saved = target
+                self._verified = asset
                 self._state.update(state="ready", path=str(target), rollback=recovery, rollbackError=recovery_error)
         except (OSError, HTTPException, ValueError) as error:
             message = str(error) if isinstance(error, ValueError) else "无法下载或保存更新包，请检查网络与磁盘空间"
@@ -330,6 +340,45 @@ class UpdateDownloads:
                     temporary.unlink(missing_ok=True)
                 except OSError:
                     pass
+
+    def installing(self) -> bool:
+        with self._lock:
+            return self._state["state"] == "installing"
+
+    def install(self) -> dict:
+        with self._lock:
+            if self._state["state"] != "ready" or self._saved is None or self._verified is None:
+                return {"ok": False, "msg": "请先下载并校验更新包"}
+            if not self._state.get("rollback"):
+                return {"ok": False, "msg": "未创建恢复点，请重新下载更新包"}
+            root = self.root
+            if (os.name != "nt" or root is None or not (root / "Rewards.exe").is_file()
+                    or not (root / "runtime/python/python.exe").is_file()):
+                return {"ok": False, "msg": "一键更新仅适用于 Windows 便携版"}
+            work = None
+            try:
+                if (self.folder.lstat().st_file_attributes & 0x400) != 0:
+                    raise OSError("更新目录是链接或联接")
+                work = Path(tempfile.mkdtemp(prefix="install-", dir=self.folder))
+                runtime = root / "runtime/python"
+                for file in runtime.iterdir():
+                    if file.is_file():
+                        shutil.copy2(file, work / file.name)
+                for name in ("updates.py", "update_install.py"):
+                    shutil.copy2(Path(__file__).with_name(name), work / name)
+                (self.folder / "install-result.json").unlink(missing_ok=True)
+                subprocess.Popen(
+                    [str(work / "python.exe"), str(work / "update_install.py"), str(root),
+                     str(self._saved), self._verified.tag, self._verified.sha256, str(os.getpid())],
+                    cwd=work, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
+                )
+            except OSError as error:
+                if work is not None:
+                    shutil.rmtree(work, ignore_errors=True)
+                return {"ok": False, "msg": f"无法启动自动更新：{error}"}
+            self._state["state"] = "installing"
+            return {"ok": True}
 
     def open_folder(self) -> dict:
         with self._lock:
