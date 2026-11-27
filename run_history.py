@@ -6,7 +6,6 @@ import ctypes
 import gzip
 import json
 import os
-import shutil
 import signal
 import re
 import shutil
@@ -64,7 +63,7 @@ def _log_file(data: Path, run_id: int) -> Path:
 
 
 NOTICE_TYPES = {"success", "failed", "login", "update", "scheduler", "restriction", "reminder"}
-PARTICIPATION_MODES = {"reminder", "automatic"}
+PARTICIPATION_MODES = {"reminder", "browser", "automatic"}
 
 
 def _notices(data: Path) -> sqlite3.Connection:
@@ -292,6 +291,17 @@ def scheduled_run_finished(data: Path, slot: int) -> bool:
             "SELECT 1 FROM runs WHERE scheduled_at = ? AND status IN ('success', 'skipped', 'reminded')",
             (slot,),
         ).fetchone() is not None
+
+
+def record_browser_assist(data: Path, *, source: str = "manual") -> int | None:
+    run_id = _claim(data, source, None, "browser_assist")
+    if run_id is None:
+        return None
+    _finish(data, run_id, "assisted", [], None, 0, "用户在浏览器中手动完成")
+    record_notice(data, "reminder", "浏览器辅助已打开",
+                  "请在浏览器中手动完成任务。完成后可回到面板查看记录。",
+                  run_id=run_id, event=f"browser-assist:{run_id}")
+    return run_id
 
 
 def record_skips(data: Path, skips: list[tuple[int, str]]) -> None:

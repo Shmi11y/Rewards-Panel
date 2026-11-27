@@ -837,10 +837,12 @@
   <p class="sub" id="participationHint" hidden>选择后，已有账号和定时计划会保留。</p>
   <div class="seg" id="participationMode" role="group" aria-label="选择参与模式">
     <button data-participation="reminder" aria-pressed="false">仅查看与提醒</button>
+    <button data-participation="browser" aria-pressed="false">浏览器辅助</button>
     <button data-participation="automatic" aria-pressed="false">自动任务</button>
   </div>
   <div class="sub participation-help">
     <p><strong>仅查看与提醒</strong>　查看积分，按计划接收提醒。</p>
+    <p><strong>浏览器辅助</strong>　打开微软 Rewards，任务由你手动点击，面板负责提醒和记录。</p>
     <p><strong>自动任务</strong>　手动启动任务，已启用的定时和开机计划也会自动执行。</p>
   </div>
   <p class="err" id="participationError" role="alert" hidden></p>
@@ -977,11 +979,12 @@ async function confirmRisk(){
 function renderParticipation(schedule,running){
   const mode=schedule?.participation;
   const automatic=mode==='automatic';
-  $('btnRunLabel').textContent=automatic?'开始任务':'打开微软 Rewards ↗';
+  const browserMode=mode==='browser';
+  $('btnRunLabel').textContent=automatic?'开始任务':browserMode?'打开并辅助记录 ↗':'打开微软 Rewards ↗';
   $('btnRunIcon').toggleAttribute('hidden',!automatic);
   $('btnStop').hidden=!automatic&&!running;
   $('homeParticipationGroup').hidden=!mode;
-  $('homeParticipationMode').textContent=automatic?'自动任务':mode==='reminder'?'仅查看与提醒':'';
+  $('homeParticipationMode').textContent=automatic?'自动任务':browserMode?'浏览器辅助':mode==='reminder'?'仅查看与提醒':'';
   $('homeParticipationMode').hidden=mode==='pending';
   $('homeParticipation').textContent=mode==='pending'?'选择模式':'切换模式';
   $('homeParticipation').disabled=running||participationSwitchPending;
@@ -1232,7 +1235,7 @@ function spark(points){
 const RUN_SOURCES={manual:'手动',daily:'定时',boot:'开机'};
 const RUN_STATUSES={
   running:'运行中',started:'运行中',pending:'等待运行',success:'已完成',partial:'部分失败',failed:'失败',needs_login:'需重新登录',
-  restricted:'异常已暂停',held:'暂停已跳过',skipped:'已跳过',reminded:'已记录提醒',stopped:'已停止',interrupted:'已中断',not_run:'未运行',unknown:'结果未知'
+  restricted:'异常已暂停',held:'暂停已跳过',skipped:'已跳过',reminded:'已记录提醒',assisted:'浏览器辅助',stopped:'已停止',interrupted:'已中断',not_run:'未运行',unknown:'结果未知'
 };
 const HOLD_REASONS={
   earning_limited:'微软提示积分获取受限',verification_required:'微软要求验证身份',
@@ -1268,7 +1271,7 @@ function accountPointsResult(account){
 }
 
 function runSummary(run){
-  const source=run.status==='reminded'?(run.scheduleKind==='catch_up'?'定时补提醒':(RUN_SOURCES[run.source]||'定时')+'提醒'):
+  const source=run.status==='assisted'?'浏览器辅助':run.status==='reminded'?(run.scheduleKind==='catch_up'?'定时补提醒':(RUN_SOURCES[run.source]||'定时')+'提醒'):
     run.scheduleKind==='catch_up' ? '定时补跑' : run.scheduleKind==='retry' ? '定时重试' : RUN_SOURCES[run.source]||'任务';
   const parts=[RUN_TIME.format(new Date(run.startedAt*1000)),source];
   if(run.scheduledAt!=null && run.scheduleKind!=='on_time'){
@@ -1335,7 +1338,7 @@ async function loadRunHistory(){
           +(account.phase&&button?' ':'')+button+'</td></tr>';
       }).join('');
       const note=run.reason ? '<p class="sub">'+esc(run.reason)+'</p>' : '';
-      const accounts=run.status==='reminded'?'<p class="sub">可在微软 Rewards 自行完成活动。</p><a class="button-link ghost sm" href="'+REWARDS_DASHBOARD+'" target="_blank" rel="noopener noreferrer" data-rewards-dashboard>打开微软 Rewards ↗</a>':results ? '<table><thead><tr><th>账号</th><th>任务结果</th><th>积分变化</th><th>操作</th></tr></thead><tbody>'
+      const accounts=['reminded','assisted'].includes(run.status)?'<p class="sub">'+(run.status==='assisted'?'请在浏览器中手动完成任务，完成后回到面板查看记录。':'可在微软 Rewards 自行完成活动。')+'</p><a class="button-link ghost sm" href="'+REWARDS_DASHBOARD+'" target="_blank" rel="noopener noreferrer" data-rewards-dashboard>打开微软 Rewards ↗</a>':results ? '<table><thead><tr><th>账号</th><th>任务结果</th><th>积分变化</th><th>操作</th></tr></thead><tbody>'
         +results+'</tbody></table>' : '<p class="sub">'+(run.status==='running'?'运行结束后显示账号结果':'暂无账号结果')+'</p>';
       const reviewPoints=['unchanged','unavailable'].includes(run.pointsOutcome)
         || run.accounts.some(account=>account.status==='success' && (account.points==null || account.points===0));
@@ -1343,7 +1346,7 @@ async function loadRunHistory(){
         +'<a class="button-link ghost sm" href="https://rewards.bing.com/dashboard" target="_blank" rel="noopener noreferrer" data-rewards-dashboard>打开微软 Rewards ↗</a></div>' : '';
       const retryAll=run.status!=='running'&&run.accounts.some(a=>historyAccountAction(a)==='retry')
         ?'<button class="ghost sm" data-run-action="retry-all"'+(historyActionPending?' disabled':'')+'>重试失败账号</button>':'';
-      const logButton=run.scheduleKind==='skipped' || run.status==='reminded' || (run.status==='skipped'&&run.reason) ? '' : '<div class="run-entry-actions">'
+      const logButton=run.scheduleKind==='skipped' || ['reminded','assisted'].includes(run.status) || (run.status==='skipped'&&run.reason) ? '' : '<div class="run-entry-actions">'
         +retryAll+'<button class="ghost sm" data-run-action="log">查看本次日志</button></div>';
       return '<details class="run-entry" data-run="'+id+'"'+(open?' open':'')+'><summary>'
         +runBadge(run.status)+'<span class="k">'+esc(runSummary(run))+'</span></summary><div class="run-entry-body">'
@@ -2231,7 +2234,15 @@ async function doLogin(email, endpoint='/api/accounts/login', feedback=toast){
 document.querySelectorAll('.navitem').forEach(n=>n.onclick=()=>nav(n.dataset.nav));
 
 $('btnRun').onclick=async event=>{
-  if(STATUS?.schedule?.participation!=='automatic') return openRewardsPage(event,'dashboard');
+  const mode=STATUS?.schedule?.participation;
+  if(mode==='browser'){
+    const result=await post('/api/run',{});
+    if(!result.ok) return toast(result.msg||'无法记录辅助运行');
+    openRewardsPage(event,'dashboard');
+    toast('已打开微软 Rewards，完成后回到面板查看记录');
+    return;
+  }
+  if(mode!=='automatic') return openRewardsPage(event,'dashboard');
   if(!await confirmRisk()) return;
   BUSY=true; $('btnRun').disabled=true;
   const only = $('onlyActive').checked && STATUS && STATUS.accounts ? STATUS.accounts.active : null;
@@ -2381,7 +2392,7 @@ $('participationMode').onclick=async event=>{
     await tick();
     renderTimeRows();
     $('participationDialog').close();
-    toast(mode==='automatic'?'已启用自动任务':'已切换到仅查看与提醒');
+    toast(mode==='automatic'?'已启用自动任务':mode==='browser'?'已切换到浏览器辅助':'已切换到仅查看与提醒');
   }catch(error){
     errorText.textContent=error.message||'无法保存参与模式';
     errorText.hidden=false;

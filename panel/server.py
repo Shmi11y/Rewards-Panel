@@ -1307,7 +1307,12 @@ class Handler(BaseHTTPRequestHandler):
         elif self.path == "/api/run":
             only = body.get("only") if isinstance(body, dict) else False
             if only is None or isinstance(only, str):
-                result = start_run(only or None)
+                if run_history.participation(DATA_DIR) == "browser":
+                    run_id = run_history.record_browser_assist(DATA_DIR)
+                    result = {"ok": bool(run_id), "runId": run_id,
+                              "msg": "" if run_id else "已有记录正在写入，请稍后再试"}
+                else:
+                    result = start_run(only or None)
             else:
                 result = {"ok": False, "msg": "账号参数不合法"}
         elif self.path == "/api/stop":
