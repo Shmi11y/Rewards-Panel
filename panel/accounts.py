@@ -39,7 +39,7 @@ from panel import balance
 
 ROOT = Path(os.environ.get("REWARDS_APP_ROOT") or Path(__file__).resolve().parent.parent)
 DATA_DIR = Path(os.environ.get("REWARDS_DATA_DIR") or ROOT / "data")
-NODE = ROOT / "app" / "node.exe"
+NODE = run_history.node_path(ROOT)
 LOGIN_JS = ROOT / "login.js"
 BROWSER_ROOT = ROOT / "browser"
 
@@ -542,8 +542,10 @@ def start_login(email: str, *, existing_only: bool = False) -> dict:
     email = email.strip()
     if not email or "@" not in email:
         return {"ok": False, "msg": "邮箱格式不对"}
-    if not NODE.exists() or not LOGIN_JS.exists():
-        return {"ok": False, "msg": "缺少 node.exe 或 login.js"}
+    if NODE is None or not NODE.is_file() or not LOGIN_JS.is_file():
+        return {"ok": False, "msg": "缺少 Node.js 或 login.js"}
+    if os.name != "nt" and not os.environ.get("DISPLAY"):
+        return {"ok": False, "msg": "没有可用的图形会话。请在 Linux 桌面启动面板，或按 Docker 登录说明连接 VNC。"}
     with _lock:
         if account_holds.get(DATA_DIR, email):
             return {"ok": False, "msg": "账号已暂停，请到微软官网确认后手动恢复"}

@@ -6,6 +6,8 @@ import ctypes
 import gzip
 import json
 import os
+import shutil
+import signal
 import re
 import shutil
 import sqlite3
@@ -139,9 +141,26 @@ def progress(data: Path, run: dict, history: list[dict]) -> dict:
             "elapsedSeconds": elapsed, "remainingSeconds": estimate}
 
 
+def node_path(root: Path) -> Path | None:
+    if os.name == "nt":
+        return root / "app" / "node.exe"
+    node = shutil.which("node")
+    return Path(node) if node else None
+
+
 def process_alive(pid: int) -> bool:
-    if not pid:
+    if not pid or pid < 0:
         return False
+    if os.name != "nt":
+        try:
+            os.kill(pid, 0)
+            return Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[0] != "Z"
+        except PermissionError:
+            return True
+        except ProcessLookupError:
+            return False
+        except FileNotFoundError:
+            return False
     kernel = ctypes.windll.kernel32
     open_process = kernel.OpenProcess
     open_process.restype = ctypes.c_void_p
@@ -487,7 +506,15 @@ def launch(source: str, *, env: dict, output=subprocess.DEVNULL,
         time.sleep(0.05)
 
 
-def _stop_engine(pid: int) -> bool:
+def stop_engine(pid: int) -> bool:
+    if os.name != "nt":
+        try:
+            os.killpg(pid, signal.SIGKILL)
+            return True
+        except ProcessLookupError:
+            return not process_alive(pid)
+        except OSError:
+            return False
     try:
         killed = subprocess.run(
             ["taskkill", "/F", "/T", "/PID", str(pid)],
@@ -509,7 +536,7 @@ def request_stop(data: Path) -> dict | None:
         if not row or not process_alive(row["runner_pid"]):
             return None
         conn.execute("UPDATE runs SET stop_requested = 1 WHERE id = ?", (row["id"],))
-    if row["engine_pid"] and not _stop_engine(row["engine_pid"]):
+    if row["engine_pid"] and not stop_engine(row["engine_pid"]):
         with closing(_connect(data)) as conn, conn:
             conn.execute("UPDATE runs SET stop_requested = 0 WHERE id = ? AND status = 'running'", (row["id"],))
         return {"ok": False, "msg": "结束进程失败"}
@@ -657,6 +684,8 @@ def _notify(data: Path, run_id: int, source: str, status: str, accounts: list[di
 def _send_notice(data: Path, run_id: int, category: str, title: str, message: str, event: str) -> None:
     if not record_notice(data, category, title, message, run_id=run_id, event=event):
         return
+    if os.name != "nt":
+        return
     try:
         if category == "reminder":
             windows_notifications.show(ROOT, data, None, title, message, reminder=True)
@@ -756,9 +785,11 @@ def run(data: Path, source: str, scheduled_at: int | None = None, schedule_kind:
             env = dict(os.environ, REWARDS_DATA_DIR=str(data), REWARDS_APP_ROOT=str(ROOT),
                        PLAYWRIGHT_BROWSERS_PATH=str(ROOT / "browser"), REWARDS_RUN_EVENTS=str(events),
                        NODE_NO_WARNINGS="1", REWARDS_RUN_ID=str(run_id))
-            node, entry, preload = ROOT / "app/node.exe", ROOT / "app/dist/index.js", ROOT / "task-data.cjs"
-            missing = next((path for path in (node, entry, preload) if not path.is_file()), None)
-            if missing:
+            node, entry, preload = node_path(ROOT), ROOT / "app/dist/index.js", ROOT / "task-data.cjs"
+            missing = next((path for path in (entry, preload) if not path.is_file()), None)
+            if node is None or not node.is_file():
+                reason = "缺少 Node.js"
+            elif missing:
                 reason = f"缺少 {missing.relative_to(ROOT).as_posix()}"
             else:
                 flags = 0 if sys.stdin is not None and sys.stdin.isatty() else NO_WINDOW
@@ -771,12 +802,13 @@ def run(data: Path, source: str, scheduled_at: int | None = None, schedule_kind:
                 try:
                     with subprocess.Popen([str(node), "--require", str(preload), str(entry)],
                                           cwd=ROOT / "app", env=env, creationflags=flags,
+                                          start_new_session=os.name != "nt",
                                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT) as proc:
                         with closing(_connect(data)) as conn, conn:
                             conn.execute("UPDATE runs SET engine_pid = ? WHERE id = ?", (proc.pid, run_id))
                             stop = conn.execute("SELECT stop_requested FROM runs WHERE id = ?", (run_id,)).fetchone()[0]
                         if stop:
-                            _stop_engine(proc.pid)
+                            stop_engine(proc.pid)
                         assert proc.stdout is not None
                         done = threading.Event()
                         watcher = threading.Thread(target=_watch_account_holds, args=(data, run_id, done), daemon=True)

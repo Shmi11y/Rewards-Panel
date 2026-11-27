@@ -1,0 +1,28 @@
+services:
+  rewards:
+    build: .
+    image: rewards-panel:local
+    init: true
+    restart: unless-stopped
+    shm_size: 512m
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      TZ: "${TZ:-Asia/Shanghai}"
+    ports:
+      - "127.0.0.1:${REWARDS_PORT:-8765}:8765"
+      - "127.0.0.1:${REWARDS_VNC_PORT:-5900}:5900"
+    volumes:
+      - rewards-data:/opt/rewards/data
+    healthcheck:
+      test:
+        - CMD
+        - python3
+        - -c
+        - "import http.client; c=http.client.HTTPConnection('127.0.0.1',8765,timeout=3); c.request('GET','/'); assert c.getresponse().status==403"
+      interval: 20s
+      timeout: 5s
+      retries: 4
+
+volumes:
+  rewards-data:

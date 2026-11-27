@@ -1,0 +1,66 @@
+name: Linux and Docker
+on:
+  push:
+    branches: ['release/**']
+  pull_request:
+    paths:
+      - '**.py'
+      - '**.sh'
+      - 'panel/**'
+      - 'Dockerfile'
+      - 'compose.yaml'
+      - '.dockerignore'
+      - '.github/workflows/linux-docker.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install and test the Linux build
+        shell: bash
+        run: |
+          bash install-linux.sh --with-deps
+          export PLAYWRIGHT_BROWSERS_PATH="$PWD/browser"
+          node tools/smoke-browser.cjs
+          export REWARDS_DATA_DIR="$(mktemp -d)"
+          bash launch-linux.sh > "$RUNNER_TEMP/rewards-linux.log" 2>&1 &
+          panel_pid=$!
+          trap 'kill "$panel_pid" 2>/dev/null || true; cat "$RUNNER_TEMP/rewards-linux.log"' EXIT
+          python3 tools/smoke-panel.py linux "$REWARDS_DATA_DIR/.api-token"
+
+  docker:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and test the Docker image
+        shell: bash
+        run: |
+          docker compose config --quiet
+          docker compose up -d --build
+          trap 'docker compose logs; docker compose down -v' EXIT
+          docker compose exec -T rewards test -S /tmp/.X11-unix/X99
+          docker compose exec -T rewards node - < tools/smoke-browser.cjs
+          docker compose cp rewards:/opt/rewards/data/.api-token "$RUNNER_TEMP/rewards-token"
+          python3 tools/smoke-panel.py docker "$RUNNER_TEMP/rewards-token"
+          docker compose restart rewards
+          python3 tools/smoke-panel.py docker "$RUNNER_TEMP/rewards-token" --check-persistence
+          version=$(cat VERSION)
+          docker tag rewards-panel:local "rewards-panel:$version"
+          docker save "rewards-panel:$version" | gzip -1 > RewardsPanel-docker-amd64.tar.gz
+      - uses: actions/upload-artifact@v4
+        if: github.event_name == 'push'
+        with:
+          name: docker-amd64
+          path: RewardsPanel-docker-amd64.tar.gz
+          compression-level: 0
+          if-no-files-found: error

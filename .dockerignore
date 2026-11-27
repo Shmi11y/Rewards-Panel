@@ -1,0 +1,16 @@
+**
+!Dockerfile
+!install-linux.sh
+!launch-linux.sh
+!VERSION
+!LICENSE
+!THIRD-PARTY-NOTICES.md
+!*.py
+!*.js
+!*.cjs
+!panel/
+!panel/*.py
+!panel/index.html
+!assets/
+!assets/icon.png
+!assets/icon.ico

@@ -11,10 +11,10 @@ Rewards 面板后端（便携版）
 """
 from __future__ import annotations
 
-import ctypes
 import json
 import os
 import secrets
+import shutil
 import re
 import sqlite3
 import subprocess
@@ -22,16 +22,19 @@ import sys
 import threading
 import time
 from datetime import datetime
+from http.cookies import CookieError, SimpleCookie
+from urllib.parse import parse_qs, urlsplit
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
 ROOT = Path(os.environ.get("REWARDS_APP_ROOT") or Path(__file__).resolve().parent.parent)
 HOME = ROOT / "app"
-NODE = HOME / "node.exe"
 ENTRY = HOME / "dist" / "index.js"
 LOG_DIR = HOME / "logs"
 BROWSER_ROOT = ROOT / "browser"
+WINDOWS = os.name == "nt"
+CONTAINER = not WINDOWS and os.environ.get("REWARDS_CONTAINER") == "1"
 
 
 def _data_dir() -> Path:
@@ -39,10 +42,13 @@ def _data_dir() -> Path:
     if env:
         return Path(env).resolve()
     local = ROOT / "data"
-    if local.exists():
+    if local.exists() or not WINDOWS:
         return local
     return Path(os.environ.get("LOCALAPPDATA", "")) / "RewardsBot"
 
+
+if not WINDOWS:
+    os.umask(0o077)
 
 DATA_DIR = _data_dir()
 os.environ["REWARDS_DATA_DIR"] = str(DATA_DIR)
@@ -58,6 +64,8 @@ import run_history
 import diagnostics
 import updates
 from windows_notifications import REWARDS_DASHBOARD, valid_run_id
+
+NODE = run_history.node_path(ROOT)
 
 SESSION_DB = DATA_DIR / "sessions" / "sessions.db"
 CONFIG_FILE = DATA_DIR / "config.json"
@@ -357,6 +365,8 @@ def _validate_backup(body: dict) -> None:
             or type(body["formatVersion"]) is not int or body["formatVersion"] != BACKUP_FORMAT):
         raise ValueError("无法识别的设置备份格式或版本")
     tasks, plan, prefs = body["tasks"], body["schedule"], body["interface"]
+    if not WINDOWS and isinstance(plan, dict) and plan.get("mode") == "boot":
+        raise ValueError("此备份使用 Windows 开机计划，请先在原应用改为每日定时或手动")
     if not isinstance(tasks, dict) or set(tasks).difference(ALL_KEYS):
         raise ValueError("备份包含不支持的任务设置")
     for key, value in tasks.items():
@@ -487,21 +497,24 @@ def import_settings(backup: dict) -> dict:
 
 
 def install_browser() -> dict:
-    node = HOME / "node.exe"
+    if CONTAINER:
+        return {"ok": False, "msg": "Chromium 随 Docker 镜像提供，请重新构建或更新镜像"}
+    node = NODE
     cli = HOME / "node_modules" / "patchright" / "cli.js"
-    if not node.exists() or not cli.exists():
-        return {"ok": False, "msg": "找不到 node.exe 或 patchright/cli.js"}
+    if node is None or not node.is_file() or not cli.is_file():
+        return {"ok": False, "msg": "找不到 Node.js 或 patchright/cli.js"}
     env = dict(os.environ)
     env["PLAYWRIGHT_BROWSERS_PATH"] = str(BROWSER_ROOT)
     (ROOT / "logs").mkdir(exist_ok=True)
     fh = open(ROOT / "logs" / "browser-install.log", "ab")
     try:
-        subprocess.Popen(
-            [str(node), str(cli), "install", "chromium"],
-            cwd=str(HOME), env=env,
-            stdout=fh, stderr=subprocess.STDOUT,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-        )
+        with fh:
+            subprocess.Popen(
+                [str(node), str(cli), "install", "chromium"],
+                cwd=str(HOME), env=env,
+                stdout=fh, stderr=subprocess.STDOUT,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "msg": str(exc)}
     return {"ok": True, "msg": "已开始下载内置内核，约 184MB"}
@@ -536,9 +549,9 @@ def read_logs(count: int = 300) -> dict:
 
 
 def _node_version() -> tuple[bool, str]:
-    node = HOME / "node.exe"
-    if not node.exists():
-        return False, "缺少 node.exe"
+    node = NODE
+    if node is None or not node.is_file():
+        return False, "缺少 Node.js"
     try:
         res = subprocess.run([str(node), "-v"], capture_output=True, text=True, timeout=10,
                              creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
@@ -549,6 +562,8 @@ def _node_version() -> tuple[bool, str]:
 
 
 def system_browsers() -> dict:
+    if not WINDOWS:
+        return {"chrome": shutil.which("google-chrome") or "", "edge": shutil.which("microsoft-edge") or ""}
     def probe(candidates):
         for c in candidates:
             if c and Path(c).exists():
@@ -595,7 +610,7 @@ def selftest() -> dict:
                    "detail": f"{logged} 个已登录" if logged else "全部需要重新登录"})
 
     pyw = sched_mod.find_pythonw()
-    checks.append({"name": "定时守护依赖", "ok": bool(pyw), "detail": pyw or "未找到 pythonw.exe"})
+    checks.append({"name": "定时守护依赖", "ok": bool(pyw), "detail": pyw or "未找到 Python 运行时"})
 
     sysb = system_browsers()
     checks.append({"name": "系统浏览器", "ok": True,
@@ -706,16 +721,7 @@ def proc_alive() -> bool:
         return _proc is not None and _proc.poll() is None
 
 
-def _pid_alive(pid: int) -> bool:
-    if not pid:
-        return False
-    handle = ctypes.windll.kernel32.OpenProcess(0x1000, False, pid)
-    if not handle:
-        return False
-    code = ctypes.c_ulong()
-    ok = ctypes.windll.kernel32.GetExitCodeProcess(handle, ctypes.byref(code))
-    ctypes.windll.kernel32.CloseHandle(handle)
-    return bool(ok) and code.value == 259
+_pid_alive = run_history.process_alive
 
 
 def task_pid() -> int:
@@ -944,7 +950,8 @@ def build_status() -> dict:
         "app": {
             "home": str(HOME),
             "root": str(ROOT),
-            "nodeOk": NODE.exists(),
+            "nodeOk": NODE is not None and NODE.is_file(),
+            "platform": "windows" if WINDOWS else "docker" if CONTAINER else "linux",
             "entryOk": ENTRY.exists(),
             "browser": browser_version(),
         },
@@ -1042,10 +1049,7 @@ def stop_run() -> dict:
         if not ext or not _pid_alive(ext):
             return {"ok": False, "msg": "当前没有在跑"}
         try:
-            stopped = subprocess.run(["taskkill", "/F", "/T", "/PID", str(ext)],
-                                     capture_output=True, timeout=8,
-                                     creationflags=run_history.NO_WINDOW)
-            if stopped.returncode and _pid_alive(ext):
+            if not WINDOWS or not run_history.stop_engine(ext):
                 return {"ok": False, "msg": "结束进程失败"}
             (DATA_DIR / "task.pid").unlink(missing_ok=True)
         except (OSError, subprocess.SubprocessError):
@@ -1063,24 +1067,28 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        self.send_header("Referrer-Policy", "no-referrer")
         if getattr(self, "_set_token", False) and TOKEN:
-            self.send_header("Set-Cookie", f"rw_token={TOKEN}; Path=/; SameSite=Lax")
+            self.send_header("Set-Cookie", f"rw_token={TOKEN}; Path=/; HttpOnly; SameSite=Strict")
             self._set_token = False
         self.end_headers()
         self.wfile.write(body)
 
     def _authorized(self) -> bool:
-        """无令牌文件时全部放行；有令牌则要求 cookie 或首次 ?k="""
         if not TOKEN:
-            return True
-        if "rw_token=" + TOKEN in (self.headers.get("Cookie") or ""):
-            return True
+            return WINDOWS
         try:
-            from urllib.parse import urlparse, parse_qs
-            if parse_qs(urlparse(self.path).query).get("k", [""])[0] == TOKEN:
-                self._set_token = True      # 首次带 ?k= 进来，顺手写入 cookie
+            if not WINDOWS and urlsplit("//" + self.headers.get("Host", "")).hostname not in (
+                "127.0.0.1", "localhost", "::1",
+            ):
+                return False
+            cookie = SimpleCookie(self.headers.get("Cookie", ""))
+            if "rw_token" in cookie and secrets.compare_digest(cookie["rw_token"].value.encode(), TOKEN.encode()):
                 return True
-        except Exception:
+            if self.command == "GET" and parse_qs(urlsplit(self.path).query).get("k", [""])[0] == TOKEN:
+                self._set_token = True
+                return True
+        except (CookieError, ValueError):
             pass
         return False
 
@@ -1119,6 +1127,8 @@ class Handler(BaseHTTPRequestHandler):
         if self.path in ("/api/update/check", "/api/update/status", "/api/settings/backup"):
             if self.path == "/api/update/check":
                 result = UPDATE_DOWNLOADS.check(portable_version())
+                if not WINDOWS:
+                    result["canDownload"] = False
                 if result.get("updateAvailable"):
                     run_history.record_notice(DATA_DIR, "update", "发现新版本",
                                               f"Rewards Panel v{result['latest']} 可下载",
@@ -1255,7 +1265,8 @@ class Handler(BaseHTTPRequestHandler):
         elif self.path == "/api/settings/backup":
             result = import_settings(body)
         elif self.path == "/api/update/download":
-            result = UPDATE_DOWNLOADS.start(body.get("tag") if isinstance(body, dict) else None)
+            result = (UPDATE_DOWNLOADS.start(body.get("tag") if isinstance(body, dict) else None)
+                      if WINDOWS else {"ok": False, "msg": "请按 Linux 或 Docker 的升级步骤更新"})
         elif self.path == "/api/update/install":
             if not _local_exit:
                 result = {"ok": False, "msg": "请从便携版桌面窗口启动更新"}
@@ -1266,7 +1277,9 @@ class Handler(BaseHTTPRequestHandler):
                 if result["ok"]:
                     threading.Timer(0.4, _local_exit).start()
         elif self.path == "/api/update/open-folder":
-            result = UPDATE_DOWNLOADS.open_folder()
+            result = UPDATE_DOWNLOADS.open_folder() if WINDOWS else {"ok": False, "msg": "请在发布页查看新版"}
+        elif self.path in {"/api/rewards/dashboard", "/api/rewards/redeem"} and not WINDOWS:
+            result = {"ok": False, "msg": "请从页面链接打开微软 Rewards"}
         elif self.path in {"/api/rewards/dashboard", "/api/rewards/redeem"}:
             try:
                 os.startfile("https://rewards.bing.com/redeem" if self.path.endswith("/redeem") else REWARDS_DASHBOARD)
@@ -1397,6 +1410,10 @@ def seed_config() -> None:
     if CONFIG_FILE.exists() or not example.is_file():
         return
     defaults = example.read_bytes()
+    if not WINDOWS:
+        config = json.loads(defaults)
+        config["headless"] = True
+        defaults = json.dumps(config, indent=4).encode("utf-8")
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     try:
         with CONFIG_FILE.open("xb") as target:
@@ -1416,6 +1433,8 @@ def _schedule_monitor() -> None:
 
 
 def main() -> None:
+    if not WINDOWS and not TOKEN:
+        raise RuntimeError("无法创建面板令牌，请检查数据目录权限")
     seed_config()
     try:
         prune_old_logs()
@@ -1430,7 +1449,9 @@ def main() -> None:
     print(f"Rewards 面板: http://127.0.0.1:{PORT}")
     print(f"应用根: {ROOT}")
     print(f"数据目录: {DATA_DIR}")
-    ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()
+    address = "0.0.0.0" if CONTAINER else "127.0.0.1"
+    with ThreadingHTTPServer((address, PORT), Handler) as server:
+        server.serve_forever()
 
 
 if __name__ == "__main__":

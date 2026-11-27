@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import sqlite3
 import subprocess
 import sys
@@ -34,7 +35,8 @@ SCHED = DATA / "schedule.json"
 PIDFILE = DATA / "scheduler.pid"
 SUPERVISOR_PIDFILE = DATA / "scheduler-supervisor.pid"
 SCHEDULER = ROOT / "scheduler.py"
-TASK = ROOT / "Run-Task.bat"
+WINDOWS = os.name == "nt"
+TASK = ROOT / ("Run-Task.bat" if WINDOWS else "run_history.py")
 
 STARTUP_DIR = Path(os.environ.get("APPDATA", "")) / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Startup"
 BOOT_BAT = STARTUP_DIR / "RewardsBoot.bat"
@@ -50,6 +52,8 @@ MAX_CATCH_UP_MINUTES = 1440
 # ---------------------------------------------------------------- 基础
 
 def find_pythonw() -> str | None:
+    if not WINDOWS:
+        return sys.executable
     cands = [
         ROOT / "runtime" / "python" / "pythonw.exe",
         Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Python" / "Python313" / "pythonw.exe",
@@ -162,6 +166,8 @@ def _write_bat(path: Path, lines: list[str]) -> None:
 
 
 def apply_startup(mode: str) -> dict:
+    if not WINDOWS:
+        return startup_status()
     for f in (BOOT_BAT, DAEMON_BAT):
         try:
             if f.exists():
@@ -189,6 +195,8 @@ def apply_startup(mode: str) -> dict:
 
 
 def startup_status() -> dict:
+    if not WINDOWS:
+        return {"boot": False, "daily": False, "startupDir": "", "supportsBoot": False}
     return {"boot": BOOT_BAT.exists(), "daily": DAEMON_BAT.exists(),
             "startupDir": str(STARTUP_DIR)}
 
@@ -224,6 +232,20 @@ def supervise_if_missing() -> None:
 
 def stop_daemon() -> bool:
     pid = daemon_pid()
+    if not WINDOWS:
+        try:
+            supervisor = int(SUPERVISOR_PIDFILE.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            supervisor = 0
+        stopped = False
+        for target in (supervisor, pid):
+            if _pid_alive(target):
+                try:
+                    os.kill(target, signal.SIGTERM)
+                    stopped = True
+                except ProcessLookupError:
+                    pass
+        return stopped
     if not _pid_alive(pid):
         return False
     try:
@@ -293,6 +315,8 @@ def update(mode: str, times=None, retry=None, weekdays_only=None, catch_up_mode=
            groups=None) -> dict:
     if mode not in ("manual", "daily", "boot"):
         return {"ok": False, "msg": "模式不合法"}
+    if mode == "boot" and not WINDOWS:
+        return {"ok": False, "msg": "开机任务仅适用于 Windows 桌面版"}
     data = load()
     previous_plan = (data["mode"], data["times"], data["weekdaysOnly"], data["groups"])
     if times is not None:

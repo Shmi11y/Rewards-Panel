@@ -16,11 +16,15 @@ Rewards 定时守护
 from __future__ import annotations
 
 import json
-import msvcrt
 import os
 import subprocess
 import sys
 import time
+
+if os.name == "nt":
+    import msvcrt
+else:
+    import fcntl
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -265,7 +269,7 @@ def supervise() -> None:
         if failures == 3:
             title = "Rewards 定时守护连续异常"
             message = f"守护已连续退出 {failures} 次（{reason}），仍在尝试恢复。"
-            if run_history.record_notice(DATA, "scheduler", title, message):
+            if run_history.record_notice(DATA, "scheduler", title, message) and os.name == "nt":
                 try:
                     run_history.windows_notifications.show(ROOT, DATA, None, title, message)
                 except (OSError, RuntimeError, subprocess.SubprocessError):
@@ -283,7 +287,10 @@ def main() -> None:
     with (DATA / name).open("a+b") as lock:
         lock.seek(0)
         try:
-            msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
+            if os.name == "nt":
+                msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
+            else:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError:
             return
         if worker:

@@ -704,7 +704,7 @@
         </div>
         <div class="card">
           <h2>窗口</h2>
-          <label class="chk"><input type="checkbox" id="keepInTray">关闭窗口后留在托盘（默认）</label>
+          <label class="chk" id="trayPreference"><input type="checkbox" id="keepInTray">关闭窗口后留在托盘（默认）</label>
         </div>
         </div>
         <div class="pane" data-pane="t3">
@@ -1095,12 +1095,14 @@ function renderSchedule(sc){
   $('schCatchLimit').value = String(sc.catchUpMinutes ?? 720);
   $('schCatchLimit').disabled = $('schCatchUp').value === 'skip';
   $('schResume').hidden = !sc.paused;
-  $('schHint').textContent = sc.participation==='pending'?'在总览选择参与模式后，定时计划会按所选模式生效。':sc.paused ? '定时已暂停，可以从这里或托盘菜单恢复。' : !automatic
-    ? {manual:'未安排定时提醒。',daily:'到点发送 Windows 提醒，关闭面板后仍生效。',boot:'开机登录后发送 Windows 提醒。'}[SCH_MODE]
+  const supportsBoot=sc.supportsBoot!==false;
+  $('schBootMode').style.display=supportsBoot?'':'none';
+  $('schHint').textContent = sc.participation==='pending'?'在总览选择参与模式后，定时计划会按所选模式生效。':sc.paused ? (supportsBoot?'定时已暂停，可以从这里或托盘菜单恢复。':'定时已暂停，可以从这里恢复。') : !automatic
+    ? {manual:'未安排定时提醒。',daily:supportsBoot?'到点发送 Windows 提醒，关闭面板后仍生效。':'服务运行时，到点记录到通知中心。',boot:'开机登录后发送 Windows 提醒。'}[SCH_MODE]
     : SCH_MODE==='manual'
     ? '只在你点「开始任务」时执行'
     : SCH_MODE==='daily'
-      ? '守护进程常驻后台，到点自动跑一次。关掉应用也会生效。'
+      ? (supportsBoot?'守护进程常驻后台，到点自动跑一次。关掉应用也会生效。':'服务运行时，到点自动跑一次。')
       : '开机登录后约 1 分钟自动跑一次。';
   const flags = ((sc.daily?'定时 ':'') + (sc.boot?'开机 ':'')).trim() || '未写入';
   const doneList = (sc.doneToday || []);
@@ -1108,7 +1110,7 @@ function renderSchedule(sc){
     [sc.paused ? '暂停至' : automatic?'下次运行':'下次提醒', sc.paused ? sc.pauseUntil || '手动恢复' : sc.nextRun || '—'],
     ['今日已处理', doneList.length ? doneList.join('、') : '—'],
     ['守护进程', sc.daemonAlive ? '运行中' : '未运行'],
-    ['开机启动项', flags],
+    ...(supportsBoot?[['开机启动项', flags]]:[]),
     ['执行脚本', sc.taskPath || ''],
   ];
   $('schInfo').innerHTML = rows.map(r=>'<div class="k">'+r[0]+'</div><div class="vv">'+esc(r[1])+'</div>').join('');
@@ -1868,7 +1870,7 @@ $('checkUpdate').onclick=async()=>{
     if(!result.ok) status.textContent=result.msg || '检查更新失败，请重试。';
     else if(result.updateAvailable){
       updateOffer=result;
-      status.textContent=result.canDownload?`发现新版 v${result.latest}。`:
+      status.textContent=STATUS?.app?.platform!=='windows' ? `发现新版 v${result.latest}，请按当前平台的升级步骤更新。` : result.canDownload?`发现新版 v${result.latest}。`:
         `发现新版 v${result.latest}，暂时无法自动校验，请打开 GitHub 发布页查看。`;
       $('updateNotes').textContent=result.notes || '暂无摘要，可在 GitHub 发布页查看。';
       $('updateRelease').hidden=false;
@@ -2160,6 +2162,15 @@ $('keepInTray').onchange=async e=>{
 
 const desktopMode=new URLSearchParams(location.search).get('desktop')==='1';
 const statusUrl=desktopMode ? '/api/status?desktop=1' : '/api/status';
+if(!desktopMode){
+  document.querySelector('.winbar').style.display='none';
+  $('trayPreference').style.display='none';
+  const currentUrl=new URL(location.href);
+  if(currentUrl.searchParams.has('k')){
+    currentUrl.searchParams.delete('k');
+    history.replaceState(null,'',currentUrl);
+  }
+}
 
 async function openRewardsPage(event,page){
   if(!desktopMode){
