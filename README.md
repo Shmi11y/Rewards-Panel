@@ -20,7 +20,7 @@ Linux 和 Docker 版提供总览、账号管理、余额同步、手动任务、
 
 ### Linux
 
-1. 下载并解压 [启动与安装包](https://github.com/Shmi11y/Rewards-Panel/releases/download/v0.1.17/RewardsPanel-linux.tar.gz)。需要 Git、Python 3.10+、Node.js 24+ 和 npm，推荐在 Ubuntu 24.04 x64 上运行。
+1. 下载并解压 [启动与安装包](https://github.com/Shmi11y/Rewards-Panel/releases/download/v0.1.17/RewardsPanel-linux-x64.tar.gz)。需要 Git、Python 3.10+、Node.js 24+ 和 npm，推荐在 Ubuntu 24.04 x64 上运行。
 2. 在解压目录运行 `bash install-linux.sh --with-deps`，首次会联网下载并构建任务引擎、安装 Chromium 和系统库。安装系统库时可能请求 sudo。
 3. 运行 `bash launch-linux.sh`。另开终端，在相同目录执行 `cat data/.api-token`，将令牌填到 `http://127.0.0.1:8765/?k=你的令牌` 末尾后，用浏览器打开。
 4. 在「账号 → 添加账号」完成首次登录。登录窗口在运行面板的 Linux 桌面上弹出，需要可用的 X11 或 XWayland 会话。已有会话后的任务可以无头运行。
@@ -392,3 +392,4 @@ Rewards 面板采用 MIT 许可。[本项目许可证](LICENSE)
 - 微软禁止用机器人、宏或其他自动化方式赚取积分。异常暂停和零积分提示可帮助及时发现问题，无法保证账号安全。来源见 [微软 Rewards 账号政策](https://support.microsoft.com/en-us/accounts-billing/rewards/getting-the-most-out-of-microsoft-rewards)。
 
 软件内可在「关于 → 使用风险与免责声明」查看这些说明。首次启用自动任务、保存自动定时、手动执行或重试任务，或添加第二个账号时，面板会提示风险。确认后记录在本地，重启后也不会重复提示。
+
