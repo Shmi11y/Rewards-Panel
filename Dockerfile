@@ -10,7 +10,7 @@ RUN bash install-linux.sh --engine-only \
 
 FROM node:24-bookworm-slim
 ENV REWARDS_CONTAINER=1 REWARDS_DATA_DIR=/opt/rewards/data \
-    PLAYWRIGHT_BROWSERS_PATH=/opt/rewards/browser TZ=Asia/Shanghai
+    PLAYWRIGHT_BROWSERS_PATH=/opt/rewards/browser TZ=Asia/Shanghai DISPLAY=:99
 
 WORKDIR /opt/rewards
 COPY --from=engine /build/app ./app
@@ -18,6 +18,8 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates python3 tzdata xvfb x11vnc \
     && node app/node_modules/patchright/cli.js install --with-deps chromium \
     && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p /tmp/.X11-unix \
+    && chmod 1777 /tmp/.X11-unix \
     && install -d -o node -g node -m 0700 data \
     && install -o node -g node -m 0600 /dev/null data/.keep \
     && ln -s ../data/engine-logs app/logs \

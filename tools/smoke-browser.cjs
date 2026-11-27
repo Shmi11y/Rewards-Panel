@@ -2,7 +2,7 @@ const path = require('node:path');
 const { chromium } = require(path.join(process.cwd(), 'app/node_modules/patchright'));
 
 async function test() {
-    for (const headless of [true]) {
+    for (const headless of process.env.REWARDS_CONTAINER ? [true, false] : [true]) {
         const browser = await chromium.launch({ headless });
         try {
             const page = await browser.newPage();

@@ -48,6 +48,10 @@ jobs:
           docker compose config --quiet
           docker compose up -d --build
           trap 'docker compose logs; docker compose down -v' EXIT
+          for attempt in {1..40}; do
+            if docker compose exec -T rewards test -f /opt/rewards/data/.api-token; then break; fi
+            sleep .25
+          done
           docker compose exec -T rewards test -S /tmp/.X11-unix/X99
           docker compose exec -T rewards node - < tools/smoke-browser.cjs
           docker compose cp rewards:/opt/rewards/data/.api-token "$RUNNER_TEMP/rewards-token"

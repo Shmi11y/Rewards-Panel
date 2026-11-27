@@ -7,7 +7,7 @@ export REWARDS_PORT="${REWARDS_PORT:-8765}"
 if [[ ${REWARDS_CONTAINER:-} == 1 ]]; then
     mkdir -p "$REWARDS_DATA_DIR/engine-logs" "$REWARDS_DATA_DIR/panel-logs" "$REWARDS_DATA_DIR/diagnostics"
     export DISPLAY=:99
-    Xvfb "$DISPLAY" -screen 0 1280x800x24 -nolisten tcp &
+    Xvfb "$DISPLAY" -screen 0 1280x800x24 -nolisten tcp -ac &
     for attempt in {1..40}; do
         if [[ -S /tmp/.X11-unix/X99 ]]; then
             break

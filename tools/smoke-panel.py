@@ -58,7 +58,7 @@ def main():
             raise RuntimeError("Restart did not recover the scheduler")
         return
 
-    assert status["schedule"]["participation"] == "pending"
+    assert status["schedule"]["participation"] == "reminder"
     assert api("/api/config")["headless"] is True
     assert api("/api/prefs", {"theme": "dark"})["ok"]
     assert api("/api/participation", {"mode": "reminder"})["ok"]
