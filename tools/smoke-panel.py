@@ -59,7 +59,7 @@ def main():
         return
 
     assert status["schedule"]["participation"] == "reminder"
-    assert api("/api/config")["headless"] is True
+    assert api("/api/config")["items"]["headless"] is True
     assert api("/api/prefs", {"theme": "dark"})["ok"]
     assert api("/api/participation", {"mode": "reminder"})["ok"]
     assert not api("/api/schedule", {"mode": "boot"})["ok"]
