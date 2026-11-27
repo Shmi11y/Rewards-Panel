@@ -360,7 +360,6 @@
     <header>
       <h1 id="pageTitle">总览</h1>
       <select id="accPick" class="accpick" title="切换账号"></select>
-      <button id="btnRefreshAccounts" class="ghost" title="立即读取最新账号状态">刷新状态</button>
       <button id="notificationButton" class="ghost" title="查看通知">通知<span class="notice-count" id="notificationCount" hidden>0</span></button>
       <span class="spacer"></span>
       <button id="btnRun" class="primary">
@@ -1818,16 +1817,6 @@ document.addEventListener('keydown', e=>{
   }
 });
 $('logReload').onclick=()=>loadLogs();
-
-$('btnRefreshAccounts').onclick=async()=>{
-  const button=$('btnRefreshAccounts');
-  button.disabled=true;
-  button.textContent='刷新中…';
-  const refreshed=await tick();
-  button.disabled=false;
-  button.textContent='刷新状态';
-  toast(refreshed?'账号状态已刷新':'刷新失败，请稍后重试');
-};
 
 async function noticeAction(action, payload={}){
   const feedback=$('noticeFeedback');
