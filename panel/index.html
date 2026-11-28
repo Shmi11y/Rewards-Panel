@@ -709,6 +709,7 @@
           <p class="sub">用本机 Edge 或 Chrome 安装 Tampermonkey，再添加「Rewards 助手」脚本。</p>
           <div class="inline card-actions">
             <button class="primary" id="participationScriptGuide">打开安装教程</button>
+            <button class="ghost" id="checkScriptConnection">检查脚本连接</button>
           </div>
           <div class="inline card-actions" id="scriptAutomationOptions">
             <label class="chk"><input type="checkbox" id="scriptOpenPage" disabled>打开页面时自动开始</label>
@@ -716,6 +717,7 @@
           </div>
           <p class="sub card-actions">默认手动。自动启动需要保持面板运行，可最小化到托盘。</p>
           <p class="sub card-actions" id="scriptAutomationStatus" role="status" hidden></p>
+          <p class="sub card-actions" id="scriptConnectionFeedback" role="status" hidden></p>
           <div class="inline card-actions">
             <button class="ghost" id="resumeScriptTasks" hidden>我已确认账号状态，恢复脚本</button>
           </div>
@@ -1087,7 +1089,7 @@ function renderParticipation(schedule,running){
   const browserMode=mode==='browser';
   const windows=STATUS?.app?.platform==='windows';
   $('btnRun').dataset.mode=mode||'reminder';
-  $('btnRunLabel').textContent=automatic?'开始任务':'打开 Rewards ↗';
+  $('btnRunLabel').textContent=automatic?(PREFS.onlyActive?'开始当前账号':'开始任务'):'打开 Rewards ↗';
   $('btnRunIcon').hidden=!automatic;
   $('btnStop').hidden=!automatic&&!running;
   $('homeParticipationGroup').hidden=!mode;
@@ -1140,6 +1142,10 @@ function renderHomeSchedule(schedule){
   const paused=enabled && schedule.paused;
   const daemonMissing=daily && !schedule.daemonAlive;
   const automatic=schedule.participation==='automatic'||(schedule.participation==='browser'&&STATUS?.scriptAutomation?.scheduled);
+  const modeLabel=schedule.participation==='automatic'?'全自动模式 · 任务引擎'
+    :schedule.participation==='browser'?'油猴脚本模式 · '+(STATUS?.scriptAutomation?.connected?'助手已连接':'等待助手连接')
+    :'手动模式 · 由你完成';
+  $('homeParticipationMode').textContent=modeLabel;
   const state=schedule.participation==='pending'?'待选择':paused?'已暂停':daily?'每天定时':boot?(automatic?'开机运行':'开机提醒'):'未启用';
   if($('homeScheduleState').textContent!==state) $('homeScheduleState').textContent=state;
   $('homeScheduleState').classList.toggle('needs_login',paused);
@@ -2574,6 +2580,13 @@ function renderScriptAutomation(state){
   $('resumeScriptTasks').hidden=!state?.hold;
   browserFeedback('scriptAutomationStatus',state?.hold ? state.hold+'，脚本已暂停。'
     : state?.unanswered ? '脚本没有接到上一次定时请求。请检查所选浏览器中的脚本版本和权限。' : '');
+  const check=$('checkScriptConnection');
+  if(check) check.disabled=!state || scriptAutomationBusy;
+  const connection=state?.connected
+    ? '已连接 · '+(state.scriptVersion?'脚本 '+state.scriptVersion:'脚本版本未知')+(state.lastPage?' · '+state.lastPage:'')
+    : state?.lastSeen ? '未连接 · 上次响应已过期，请在所选浏览器打开 Rewards'
+    : '尚未连接 · 请先在所选浏览器打开 Rewards';
+  browserFeedback('scriptConnectionFeedback',connection);
 }
 
 async function saveScriptAutomation(){
@@ -2605,8 +2618,27 @@ function openScriptGuide(){
   loadBrowserPreferences();
 }
 
+async function checkScriptConnection(){
+  const button=$('checkScriptConnection');
+  if(!button) return;
+  button.disabled=true;
+  browserFeedback('scriptConnectionFeedback','正在等待脚本响应…');
+  try{
+    await loadBrowserPreferences();
+    const state=browserSetup?.scriptAutomation;
+    browserFeedback('scriptConnectionFeedback',state?.connected
+      ? '已连接 · '+(state.scriptVersion?'脚本 '+state.scriptVersion:'脚本版本未知')+(state.lastPage?' · '+state.lastPage:'')
+      : '未连接。请在所选 Edge 或 Chrome 中打开 Rewards，并确认 Tampermonkey 已启用。');
+  }catch(error){
+    browserFeedback('scriptConnectionFeedback','检查失败，请稍后重试。');
+  }finally{
+    renderScriptAutomation(browserSetup?.scriptAutomation||STATUS?.scriptAutomation);
+  }
+}
+
 $('homeParticipation').onclick=()=>nav('participation');
 $('participationScriptGuide').onclick=openScriptGuide;
+$('checkScriptConnection').onclick=checkScriptConnection;
 $('participationDialog').addEventListener('cancel',event=>{
   if(modeOnboarding) event.preventDefault();
 });
@@ -2675,6 +2707,23 @@ $('resumeScriptTasks').onclick=async()=>{
   }finally{ $('resumeScriptTasks').disabled=false; }
 };
 
+function participationSchedulePreview(mode){
+  const schedule=STATUS?.schedule;
+  if(!schedule || schedule.mode==='manual') return '当前没有启用定时计划。';
+  const times=schedule.mode==='daily' ? (schedule.times||[]).join('、') : '登录 Windows 后约 1 分钟';
+  if(mode==='automatic') return `现有计划：${times} 执行全自动任务，失败重试和补跑规则继续保留。`;
+  if(mode==='browser') return `现有计划：${times} 打开所选 Edge 或 Chrome，由 Rewards 助手接手。需要保持桌面面板运行。`;
+  return `现有计划：${times} 只发送提醒，不会自动完成任务。`;
+}
+
+async function confirmParticipationSwitch(mode){
+  if(modeOnboarding || !STATUS?.schedule || STATUS.schedule.participation===mode) return true;
+  const answer=await dialog({title:'切换参与模式',
+    desc:`将切换为「${MODE_OPTIONS[mode].label}」。${participationSchedulePreview(mode)} 已有账号、定时和运行记录会保留。`,
+    input:false,ok:'继续切换'});
+  return answer===true;
+}
+
 async function chooseParticipation(event){
   const mode=event.target.closest('button[data-participation]')?.dataset.participation;
   if(!mode || participationSwitchPending) return;
@@ -2687,6 +2736,7 @@ async function chooseParticipation(event){
   participationSwitchPending=true;
   renderParticipation(STATUS?.schedule,running());
   try{
+    if(changed && !await confirmParticipationSwitch(mode)) return;
     if(changed && mode==='automatic' && !await confirmRisk()) return;
     if(changed){
       const result=await post('/api/participation',{mode});

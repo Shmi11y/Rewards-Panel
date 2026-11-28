@@ -349,10 +349,38 @@ def record_browser_assist(data: Path, *, source: str = "manual") -> int | None:
     if run_id is None:
         return None
     _finish(data, run_id, "assisted", [], None, 0, "已从面板打开 Rewards。活动结果可在微软页面核对。")
+    browser_script.attach_run(data, run_id)
     record_notice(data, "reminder", "浏览器辅助已打开",
                   "已从面板打开 Rewards，可在微软页面核对活动结果。",
                   run_id=run_id, event=f"browser-assist:{run_id}")
     return run_id
+
+
+def update_browser_assist(data: Path, status: str, points: int | None = None,
+                          reason: str | None = None, accounts: list[dict] | None = None) -> bool:
+    """Update the most recent browser-assist record from the userscript bridge."""
+    run_id = browser_script.active_run(data)
+    if run_id is None:
+        return False
+    allowed = {"running", "success", "failed", "needs_login", "restricted", "stopped"}
+    if status not in allowed:
+        return False
+    finished = status != "running"
+    with closing(_connect(data)) as conn, conn:
+        _begin_write(conn)
+        row = conn.execute("SELECT status FROM runs WHERE id = ?", (run_id,)).fetchone()
+        if row is None or row["status"] in {"success", "failed", "needs_login", "restricted", "stopped"}:
+            return False
+        conn.execute("""UPDATE runs SET status = ?, finished_at = ?, accounts = ?, points = ?,
+                       exit_code = ?, reason = ? WHERE id = ?""",
+                     (status, time.time() if finished else None,
+                      json.dumps(accounts or [], ensure_ascii=False), points, 0 if finished else None,
+                      reason, run_id))
+    if finished:
+        browser_script.clear_run(data, run_id)
+        if status in {"success", "failed", "needs_login", "restricted"}:
+            _notify(data, run_id, "manual", status, accounts or [], points)
+    return True
 
 
 def record_skips(data: Path, skips: list[tuple[int, str]]) -> None:
@@ -831,6 +859,7 @@ def _run_browser_schedule(data: Path, run_id: int) -> None:
             reason = "无法打开所选浏览器"
         else:
             _finish(data, run_id, "assisted", [], None, 0, "已打开浏览器，等待 Rewards 助手接手")
+            browser_script.attach_run(data, run_id)
             return
     browser_script.cancel(data, ticket)
     _finish(data, run_id, "skipped", [], None, 0, reason)

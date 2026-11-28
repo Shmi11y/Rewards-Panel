@@ -32,10 +32,20 @@ def _connect(data: Path) -> sqlite3.Connection:
             last_start REAL,
             ticket TEXT,
             ticket_until REAL,
-            held TEXT
+            held TEXT,
+            active_run INTEGER,
+            last_seen REAL,
+            last_page TEXT,
+            script_version TEXT
         )""")
         if conn.execute("SELECT 1 FROM settings WHERE id = 1").fetchone() is None:
             conn.execute("INSERT OR IGNORE INTO settings (id, token) VALUES (1, ?)", (secrets.token_urlsafe(32),))
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(settings)")}
+        for name, definition in {
+            "active_run": "INTEGER", "last_seen": "REAL", "last_page": "TEXT", "script_version": "TEXT",
+        }.items():
+            if name not in columns:
+                conn.execute(f"ALTER TABLE settings ADD COLUMN {name} {definition}")
     return conn
 
 
@@ -44,9 +54,13 @@ def _settings(conn: sqlite3.Connection) -> sqlite3.Row:
 
 
 def _public(row: sqlite3.Row) -> dict:
+    last_seen = row["last_seen"]
+    connected = type(last_seen) in (int, float) and time.time() - last_seen <= 150
     return {"openPage": bool(row["open_page"]), "scheduled": bool(row["scheduled"]),
             "hold": HOLD_REASONS.get(row["held"], ""),
-            "unanswered": bool(row["ticket"] and row["ticket_until"] <= time.time())}
+            "unanswered": bool(row["ticket"] and row["ticket_until"] <= time.time()),
+            "connected": connected, "lastSeen": last_seen, "lastPage": row["last_page"] or "",
+            "scriptVersion": row["script_version"] or "", "activeRun": row["active_run"]}
 
 
 def state(data: Path) -> dict:
@@ -66,6 +80,31 @@ def configure(data: Path, open_page: bool, scheduled: bool) -> dict:
                      ticket_until = CASE WHEN ? THEN ticket_until END WHERE id = 1""",
                      (open_page, scheduled, scheduled, scheduled))
         return _public(_settings(conn))
+
+
+def heartbeat(data: Path, version: str, page: str) -> dict:
+    version = version.strip()[:32] if isinstance(version, str) else ""
+    page = page.strip()[:120] if isinstance(page, str) else ""
+    with closing(_connect(data)) as conn, conn:
+        conn.execute("""UPDATE settings SET last_seen = ?, last_page = ?, script_version = ?
+                        WHERE id = 1""", (time.time(), page, version))
+        return _public(_settings(conn))
+
+
+def attach_run(data: Path, run_id: int) -> None:
+    with closing(_connect(data)) as conn, conn:
+        conn.execute("UPDATE settings SET active_run = ? WHERE id = 1", (run_id,))
+
+
+def active_run(data: Path) -> int | None:
+    with closing(_connect(data)) as conn:
+        value = _settings(conn)["active_run"]
+        return int(value) if isinstance(value, int) else None
+
+
+def clear_run(data: Path, run_id: int) -> None:
+    with closing(_connect(data)) as conn, conn:
+        conn.execute("UPDATE settings SET active_run = NULL WHERE id = 1 AND active_run = ?", (run_id,))
 
 
 def reserve(data: Path) -> tuple[str, str]:

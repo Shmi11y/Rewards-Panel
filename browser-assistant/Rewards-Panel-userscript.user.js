@@ -32,6 +32,7 @@
 (function () {
     'use strict';
     const PANEL_BRIDGE = null;
+    const SCRIPT_VERSION = '1.1.0';
 
     /* ============================================================
      * 0. 基础工具
@@ -749,6 +750,7 @@
         saveState(st);
         releaseLock();
         log('已停止');
+        panelRequest('finish', { status: 'stopped', reason: '用户在 Rewards 助手中停止任务' });
         render();
     }
 
@@ -762,6 +764,11 @@
         saveState(st);
         releaseLock();
         log(`今日搜索完成，共 ${st.count} 次`);
+        panelRequest('finish', {
+            status: 'success',
+            points: st.pointsNow != null && st.pointsBase != null ? st.pointsNow - st.pointsBase : null,
+            reason: st.status,
+        });
         render();
         if (cfg.notify) notify('Rewards 搜索完成', `今日已完成 ${st.count} 次搜索`);
         if (cfg.autoActivity) {
@@ -1201,6 +1208,11 @@
             st2.phase = 'done';
             st2.status = n ? `已打开 ${n} 个活动` : '每日活动已处理';
             saveState(st2);
+            panelRequest('finish', {
+                status: 'success',
+                points: st2.pointsNow != null && st2.pointsBase != null ? st2.pointsNow - st2.pointsBase : null,
+                reason: st2.status,
+            });
             render();
             if (cfg.notify) notify('Rewards 每日任务', n ? `活动已打开 ${n} 个` : '今日活动已完成');
         } else if (!st.running) {
@@ -1221,6 +1233,10 @@
 
         injectPanel();
         render();
+        panelRequest('heartbeat', { version: SCRIPT_VERSION, page: location.hostname });
+        if (PANEL_BRIDGE) setInterval(() => panelRequest('heartbeat', {
+            version: SCRIPT_VERSION, page: location.hostname,
+        }), 60000);
 
         const st = loadState();
         if (st.running) heartbeatStart();   // 续上多标签锁

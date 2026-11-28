@@ -1356,9 +1356,31 @@ class Handler(BaseHTTPRequestHandler):
         action = body.get("action")
         active = run_history.participation(DATA_DIR) == "browser"
         result = {"ok": True, "active": active}
-        if action == "status":
+        if action == "heartbeat" and active:
+            version = body.get("version", "")
+            page = body.get("page", "")
+            if not isinstance(version, str) or not isinstance(page, str):
+                reply(400, {"ok": False})
+                return
+            result.update(browser_script.heartbeat(DATA_DIR, version, page))
+        elif action == "status":
             if active:
+                browser_script.heartbeat(DATA_DIR, body.get("version", ""), body.get("page", ""))
                 result.update(browser_script.state(DATA_DIR))
+        elif action == "finish" and active:
+            status = body.get("status")
+            points = body.get("points")
+            reason = body.get("reason")
+            if status not in {"success", "failed", "needs_login", "restricted", "stopped"}:
+                reply(400, {"ok": False})
+                return
+            if points is not None and type(points) is not int:
+                reply(400, {"ok": False})
+                return
+            if reason is not None and not isinstance(reason, str):
+                reply(400, {"ok": False})
+                return
+            result["updated"] = run_history.update_browser_assist(DATA_DIR, status, points, reason)
         elif action == "claim" and active:
             ticket = body.get("ticket")
             if ticket is not None and (not isinstance(ticket, str) or not re.fullmatch(r"[A-Za-z0-9_-]{24}", ticket)):
@@ -1366,12 +1388,17 @@ class Handler(BaseHTTPRequestHandler):
                 return
             paused = ticket is not None and sched_mod.load()["paused"]
             result["started"] = not paused and browser_script.claim(DATA_DIR, ticket)
+            if result["started"]:
+                run_history.update_browser_assist(DATA_DIR, "running", reason="Rewards 助手已接手")
         elif action == "hold" and active:
             reason = body.get("reason")
             if not isinstance(reason, str) or reason not in browser_script.HOLD_REASONS:
                 reply(400, {"ok": False})
                 return
             if browser_script.hold(DATA_DIR, reason):
+                run_history.update_browser_assist(
+                    DATA_DIR, "needs_login" if reason == "needs_login" else "restricted",
+                    reason=browser_script.HOLD_REASONS[reason])
                 threading.Thread(target=run_history.notify_browser_script_hold, args=(DATA_DIR, reason), daemon=True).start()
         else:
             reply(400, {"ok": False})
