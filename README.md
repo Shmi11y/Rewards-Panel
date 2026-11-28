@@ -36,14 +36,12 @@ Python 和 Node.js 已随包提供。面板打开后，在「账号 → 添加�
 
 ## Linux 与 Docker
 
-Linux 和 Docker 版提供总览、账号管理、余额同步、手动任务、每日定时、补跑与暂停、运行记录、面板内通知和设置备份。每日定时在面板服务运行时生效。Windows 托盘、系统通知、开机启动项和 EXE 一键更新属于桌面版功能。
-
-Linux 和 Docker 的预构建下载包为 v0.1.17。
+Linux 和 Docker 版已同步至 v0.1.20，提供总览、账号管理、余额同步、手动任务、每日定时、补跑与暂停、运行记录、面板内通知和设置备份。每日定时在面板服务运行时生效。油猴脚本模式、托盘、Windows 通知、开机启动项和 EXE 一键更新适用于 Windows 桌面版。
 
 ### Linux
 
-1. 下载并解压 [启动与安装包](https://github.com/Shmi11y/Rewards-Panel/releases/download/v0.1.17/RewardsPanel-linux-x64.tar.gz)。需要 Git、Python 3.10+、Node.js 24+ 和 npm，推荐在 Ubuntu 24.04 x64 上运行。
-2. 在解压目录运行 `bash install-linux.sh --with-deps`，首次会联网下载并构建任务引擎、安装 Chromium 和系统库。安装系统库时可能请求 sudo。
+1. 下载并解压 [Linux x64 v0.1.20](https://github.com/Shmi11y/Rewards-Panel/releases/download/v0.1.20/RewardsPanel-linux-x64.tar.gz)。包内含任务引擎和 Chromium。推荐 Ubuntu 24.04 x64，需安装 Git、Python 3.10+、Node.js 24+ 和 npm。
+2. 在解压目录运行 `bash install-linux.sh --with-deps`，补齐 Chromium 所需的系统库。此步骤需要联网，可能请求 sudo。
 3. 运行 `bash launch-linux.sh`。另开终端，在相同目录执行 `cat data/.api-token`，将令牌填到 `http://127.0.0.1:8765/?k=你的令牌` 末尾后，用浏览器打开。
 4. 在「账号 → 添加账号」完成首次登录。登录窗口在运行面板的 Linux 桌面上弹出，需要可用的 X11 或 XWayland 会话。已有会话后的任务可以无头运行。
 
@@ -51,20 +49,20 @@ Linux 和 Docker 的预构建下载包为 v0.1.17。
 
 ### Docker
 
-Docker 版面板和 Chromium 都在容器内，账号、会话、设置、定时计划和日志保存在命名卷 `rewards-data`。默认同时提供 x64 镜像和源码构建方式。
+Docker 版在容器内运行面板和 Chromium。账号、会话、设置、定时计划和日志保存在 Compose 的 `rewards-data` 命名卷中。
 
-1. 下载并解压上面的启动与安装包，从其中含 `compose.yaml` 的目录运行 `docker compose up -d --build`。也可下载 [Docker x64 镜像包](https://github.com/Shmi11y/Rewards-Panel/releases/download/v0.1.17/RewardsPanel-docker-amd64.tar.gz)，再执行下列命令跳过构建。
+1. 从 [v0.1.20 源码包](https://github.com/Shmi11y/Rewards-Panel/archive/refs/tags/v0.1.20.tar.gz) 解出 `compose.yaml`。将 [Docker amd64 v0.1.20 镜像包](https://github.com/Shmi11y/Rewards-Panel/releases/download/v0.1.20/RewardsPanel-docker-amd64.tar.gz) 放在同一目录，然后执行以下命令。
 
    ```sh
    docker load -i RewardsPanel-docker-amd64.tar.gz
-   docker tag rewards-panel:0.1.17 rewards-panel:local
+   docker tag rewards-panel:0.1.20 rewards-panel:local
    docker compose up -d --no-build
    ```
 
 2. 执行 `docker compose exec -T rewards cat /opt/rewards/data/.api-token` 取得令牌，打开 `http://127.0.0.1:8765/?k=你的令牌`。面板与登录端口默认仅映射到宿主机本地。远端服务器上请使用 SSH 端口转发访问。
 3. 首次登录账号时，在终端执行 `docker compose exec rewards x11vnc -storepasswd` 设置 VNC 密码。然后执行 `docker compose exec rewards x11vnc -display :99 -rfbport 5900 -usepw -once`，用 VNC 客户端连接 `127.0.0.1:5900`。回到面板点「添加账号」或「重新登录」，在 VNC 窗口里完成登录。断开连接后 VNC 服务退出。后续仅需登录时再启动 VNC。
 
-升级前结束任务，更新镜像后运行 `docker compose up -d`。请勿使用 `docker compose down -v` 或删除数据卷。Linux 与 Docker 的数据目录依赖系统文件权限保护，账号会话应按敏感数据保管。
+也可完整解压源码包，运行 `docker compose up -d --build` 自行构建。升级前结束任务，在原 Compose 目录加载并启动新版镜像，以继续使用现有数据卷。请勿使用 `docker compose down -v` 或删除数据卷。Linux 与 Docker 的数据目录依赖系统文件权限保护，账号会话应按敏感数据保管。
 
 ## 从旧版覆盖升级
 
