@@ -42,6 +42,10 @@ Python 和 Node.js 已随包提供。
 
 ![油猴脚本模式的设置界面，显示浏览器选择、安装教程和两个自动启动开关](docs/mode-userscript.png)
 
+打开 Rewards 后，网页右下角会显示「Rewards 助手」。下图展示了助手在公开页面上的待机界面。
+
+![Microsoft Rewards 网页右下角的 Rewards 助手，显示待机状态和「开始」「暂停」「每日活动」按钮](docs/mode-userscript-assistant.png)
+
 <details>
 <summary>安装 Tampermonkey 和 Rewards 助手</summary>
 
