@@ -70,6 +70,7 @@ import account_holds
 import run_history
 import diagnostics
 import updates
+from panel import browser_script
 from windows_notifications import REWARDS_DASHBOARD, valid_run_id
 
 NODE = run_history.node_path(ROOT)
@@ -590,7 +591,8 @@ def browser_preferences() -> dict:
     channel = run_history.configured_browser_channel(DATA_DIR)
     return {"ok": True, "browser": channel or "default", "defaultChannel": run_history.windows_default_browser_channel(),
             "available": {"default": True, **{name: bool(value) for name, value in browsers.items()}},
-            "scriptUrl": f"http://127.0.0.1:{PORT}{SCRIPT_INSTALL_PATH}" if USER_SCRIPT.is_file() else ""}
+            "scriptUrl": f"http://127.0.0.1:{PORT}{SCRIPT_INSTALL_PATH}" if USER_SCRIPT.is_file() else "",
+            "scriptAutomation": browser_script.state(DATA_DIR)}
 
 
 def open_tampermonkey_store() -> dict:
@@ -991,6 +993,7 @@ def build_status() -> dict:
         "env": env_summary(),
         "accounts": accounts,
         "schedule": schedule,
+        "scriptAutomation": browser_script.state(DATA_DIR) if WINDOWS and schedule["participation"] == "browser" else None,
         "riskAcknowledged": risk_acknowledged(),
         "ui": dict(_ui_state),
         "cacheBytes": cache_size(),
@@ -1162,7 +1165,10 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(403, b"forbidden", "text/plain; charset=utf-8")
                 return
             try:
-                content = USER_SCRIPT.read_bytes()
+                source = USER_SCRIPT.read_text(encoding="utf-8")
+                bridge = json.dumps({"url": f"http://127.0.0.1:{PORT}{browser_script.BRIDGE_PATH}",
+                                     "token": browser_script.token(DATA_DIR)})
+                content = source.replace("const PANEL_BRIDGE = null;", f"const PANEL_BRIDGE = {bridge};", 1).encode("utf-8")
             except OSError:
                 self._send(404, b"not found", "text/plain; charset=utf-8")
             else:
@@ -1310,6 +1316,9 @@ class Handler(BaseHTTPRequestHandler):
         self._send(404, b"not found", "text/plain")
 
     def do_POST(self) -> None:  # noqa: N802
+        if self.path == browser_script.BRIDGE_PATH:
+            self._route_script_bridge()
+            return
         if not self._authorized():
             self._send(403, b'{"ok": false, "msg": "forbidden"}', "application/json; charset=utf-8")
             return
@@ -1322,6 +1331,52 @@ class Handler(BaseHTTPRequestHandler):
                            "application/json; charset=utf-8")
             except Exception:
                 pass
+
+    def _route_script_bridge(self) -> None:
+        def reply(code: int, result: dict) -> None:
+            self._send(code, json.dumps(result, ensure_ascii=False).encode("utf-8"),
+                       "application/json; charset=utf-8")
+
+        supplied = self.headers.get("X-Rewards-Script", "")
+        if (not WINDOWS or self.headers.get("Host") != f"127.0.0.1:{PORT}"
+                or not re.fullmatch(r"[A-Za-z0-9_-]{43}", supplied)
+                or not secrets.compare_digest(supplied, browser_script.token(DATA_DIR))):
+            reply(403, {"ok": False})
+            return
+        try:
+            size = int(self.headers.get("Content-Length", "0"))
+            if self.headers.get_content_type() != "application/json" or not 0 < size <= 1024:
+                raise ValueError()
+            body = json.loads(self.rfile.read(size))
+            if not isinstance(body, dict):
+                raise ValueError()
+        except ValueError:
+            reply(400, {"ok": False})
+            return
+        action = body.get("action")
+        active = run_history.participation(DATA_DIR) == "browser"
+        result = {"ok": True, "active": active}
+        if action == "status":
+            if active:
+                result.update(browser_script.state(DATA_DIR))
+        elif action == "claim" and active:
+            ticket = body.get("ticket")
+            if ticket is not None and (not isinstance(ticket, str) or not re.fullmatch(r"[A-Za-z0-9_-]{24}", ticket)):
+                reply(400, {"ok": False})
+                return
+            paused = ticket is not None and sched_mod.load()["paused"]
+            result["started"] = not paused and browser_script.claim(DATA_DIR, ticket)
+        elif action == "hold" and active:
+            reason = body.get("reason")
+            if not isinstance(reason, str) or reason not in browser_script.HOLD_REASONS:
+                reply(400, {"ok": False})
+                return
+            if browser_script.hold(DATA_DIR, reason):
+                threading.Thread(target=run_history.notify_browser_script_hold, args=(DATA_DIR, reason), daemon=True).start()
+        else:
+            reply(400, {"ok": False})
+            return
+        reply(200, result)
 
     def _route_post(self) -> None:
         length = int(self.headers.get("Content-Length") or 0)
@@ -1358,6 +1413,21 @@ class Handler(BaseHTTPRequestHandler):
             result = set_browser_preference(body.get("browser") if isinstance(body, dict) else None)
         elif self.path == "/api/tampermonkey/open":
             result = open_tampermonkey_store()
+        elif self.path in {"/api/browser-script/settings", "/api/browser-script/resume"}:
+            if not WINDOWS or run_history.participation(DATA_DIR) != "browser":
+                result = {"ok": False, "msg": "请先切换到油猴脚本模式"}
+            elif self.path.endswith("/resume"):
+                if not isinstance(body, dict) or body.get("confirmed") is not True:
+                    result = {"ok": False, "msg": "请先确认微软账号状态"}
+                else:
+                    result = {"ok": True, "scriptAutomation": browser_script.resume(DATA_DIR)}
+            elif (not isinstance(body, dict) or type(body.get("openPage")) is not bool
+                  or type(body.get("scheduled")) is not bool):
+                result = {"ok": False, "msg": "启动方式无效"}
+            elif (body["openPage"] or body["scheduled"]) and not risk_acknowledged():
+                result = {"ok": False, "msg": "请先确认自动任务的使用风险"}
+            else:
+                result = {"ok": True, "scriptAutomation": browser_script.configure(DATA_DIR, body["openPage"], body["scheduled"])}
         elif self.path in {"/api/rewards/dashboard", "/api/rewards/redeem"} and not WINDOWS:
             result = {"ok": False, "msg": "请从页面链接打开微软 Rewards"}
         elif self.path in {"/api/rewards/dashboard", "/api/rewards/redeem"}:

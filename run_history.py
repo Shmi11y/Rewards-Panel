@@ -25,6 +25,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 import account_holds
 import windows_notifications
+from panel import browser_script
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS runs (
@@ -741,7 +742,7 @@ def _notify(data: Path, run_id: int, source: str, status: str, accounts: list[di
     _send_notice(data, run_id, category, title, message, f"run:{run_id}")
 
 
-def _send_notice(data: Path, run_id: int, category: str, title: str, message: str, event: str) -> None:
+def _send_notice(data: Path, run_id: int | None, category: str, title: str, message: str, event: str) -> None:
     if not record_notice(data, category, title, message, run_id=run_id, event=event):
         return
     if os.name != "nt":
@@ -806,6 +807,36 @@ def schedule_pause_state(settings: dict, now: float) -> tuple[bool, float | None
     return True, None
 
 
+def notify_browser_script_hold(data: Path, reason: str) -> None:
+    category = "login" if reason == "needs_login" else "restriction"
+    _send_notice(data, None, category, "Rewards 助手已暂停",
+                 browser_script.HOLD_REASONS[reason] + "。请在微软官网确认后恢复。", f"browser-hold:{time.time_ns()}")
+
+
+def _run_browser_schedule(data: Path, run_id: int) -> None:
+    ticket, reason = browser_script.reserve(data)
+    if not ticket:
+        _finish(data, run_id, "skipped", [], None, 0, reason)
+        return
+    channel = configured_browser_channel(data) or windows_default_browser_channel()
+    executable = windows_browser_paths().get(channel)
+    if not executable:
+        reason = "油猴定时需要在「参与模式」选择已安装 Tampermonkey 的 Edge 或 Chrome"
+    elif not browser_script.panel_online(data, int(os.environ.get("REWARDS_PORT", "8765"))):
+        reason = "桌面面板未运行，请保持打开或最小化到托盘"
+    else:
+        try:
+            subprocess.Popen([executable, f"{browser_script.BING_HOME}#rp-start={ticket}"], creationflags=NO_WINDOW)
+        except OSError:
+            reason = "无法打开所选浏览器"
+        else:
+            _finish(data, run_id, "assisted", [], None, 0, "已打开浏览器，等待 Rewards 助手接手")
+            return
+    browser_script.cancel(data, ticket)
+    _finish(data, run_id, "skipped", [], None, 0, reason)
+    _send_notice(data, run_id, "reminder", "油猴定时未启动", reason, f"browser-schedule:{run_id}")
+
+
 def run(data: Path, source: str, scheduled_at: int | None = None, schedule_kind: str | None = None) -> int:
     if source in ("daily", "boot"):
         settings = _saved_schedule(data)
@@ -822,6 +853,10 @@ def run(data: Path, source: str, scheduled_at: int | None = None, schedule_kind:
     if run_id is None:
         return BUSY_EXIT
     mode = participation(data)
+    if (os.name == "nt" and mode == "browser" and source in ("daily", "boot")
+            and schedule_kind != "retry" and browser_script.state(data)["scheduled"]):
+        _run_browser_schedule(data, run_id)
+        return 0
     if mode != "automatic":
         if mode == "pending" or schedule_kind == "retry":
             reason = "请在面板确认参与模式" if mode == "pending" else "仅查看与提醒模式已跳过任务重试"

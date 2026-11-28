@@ -4,7 +4,7 @@ Rewards 面板是基于开源项目 Microsoft-Rewards-Script 的可视化面板�
 
 ## 下载 Windows x64 轻量便携版
 
-**[下载 Rewards Panel v0.1.19 轻量便携包（约 76 MiB）](https://github.com/Shmi11y/Rewards-Panel/releases/download/v0.1.19/RewardsPanel-windows-x64-lite.zip)**
+**[下载 Rewards Panel v0.1.20 轻量便携包（约 76 MiB）](https://github.com/Shmi11y/Rewards-Panel/releases/download/v0.1.20/RewardsPanel-windows-x64-lite.zip)**
 
 1. 将 ZIP 完整解压到本机可写入的目录，打开 `RewardsPanel` 文件夹。
 2. 双击带项目图标的 **`Rewards.exe`**。
@@ -27,7 +27,12 @@ Python 和 Node.js 已随包提供。面板打开后，在「账号 → 添加�
 
 ![油猴脚本安装教程，包含 Chrome 官方商店入口、脚本授权步骤和复制脚本链接](docs/script-install-guide.png)
 
-这个模式由浏览器运行脚本，面板继续提供余额、状态、提醒和运行记录。若希望在网页手动完成活动，可选择「手动模式」。
+从 v0.1.19 升级后，请通过教程重新导入脚本，在 Tampermonkey 中确认更新到 1.1.0。安装完成后默认手动开始，也可在「参与模式」开启以下选项。
+
+- **打开页面时自动开始**。打开必应首页或已登录的 Rewards 仪表盘后启动。
+- **按现有定时计划自动开始**。复用每日、开机、补跑和暂停规则。到点后会打开安装了脚本的 Edge 或 Chrome。
+
+两种自动方式可同时开启。触发重叠时只启动一次。请保持桌面面板运行，可最小化到托盘。检测到登录失效、身份验证或计分受限时，助手会暂停并通知。到微软官网确认账号状态后，可在「参与模式」解除暂停。
 
 ## Linux 与 Docker
 
@@ -369,20 +374,6 @@ RewardsApp/
 | GET | `/api/selftest` | 8 项环境自检 |
 | POST | `/api/cache/clean` | 清理登录缓存 |
 | POST | `/api/window/close` | 关闭窗口（桌面模式下可用） |
-
-## 常见问题
-
-**窗口怎么拖动**：按住**顶栏空白处**拖（标题那一行）。页面其它区域不响应拖动，避免翻日志、选文字时把窗口带跑；双击顶栏最大化/还原。
-
-**窗口启动失败**：在仓库根目录执行 `python desktop.py` 查看终端报错，并确认 Python 依赖和 WebView2 已安装。
-
-**任务栏右键显示 “Python”**：需要 `pywin32`。程序会自动在开始菜单建带 AUMID 的快捷方式，建好后取消固定再重新固定即可。
-
-**窗口越开越小**：已修（客户区/外框差值补偿）。若仍有偏差，删掉 `data/prefs.json` 里的 `win` 字段重开一次。
-
-**提示“已有任务在运行”**：可能是上次异常退出留下的进程。看 `data/task.pid`，或任务管理器结束 `node.exe`。
-
-**登录缓存占地大**：关于页有「清理缓存」按钮。
 
 ## 开发
 

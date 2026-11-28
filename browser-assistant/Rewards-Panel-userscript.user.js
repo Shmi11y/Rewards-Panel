@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Microsoft Rewards 每日任务助手
 // @namespace    brh.daily.tasks
-// @version      1.0.0
+// @version      1.1.0
 // @description  自动完成 Bing Rewards 每日搜索与每日活动：热搜与联想词双词源、高斯随机间隔、分组休息、拟人浏览、积分监控、风控自动暂停、跨天重置、多标签页锁、可视化控制台。
 // @match        *://www.bing.com/*
 // @match        *://cn.bing.com/*
@@ -19,6 +19,8 @@
 // @grant        GM_notification
 // @grant        GM_xmlhttpRequest
 // @connect      bing.com
+// @connect      127.0.0.1
+// @connect      rewards.bing.com
 // @connect      api.bing.com
 // @connect      gmya.net
 // @connect      api.gmya.net
@@ -29,6 +31,7 @@
 
 (function () {
     'use strict';
+    const PANEL_BRIDGE = null;
 
     /* ============================================================
      * 0. 基础工具
@@ -119,7 +122,6 @@
         autoActivity: true,  // 搜索完成后自动打开每日活动
         maxActivities: 8,    // 单次最多打开活动数
         notify: true,        // 桌面通知
-        autoStart: false,    // 打开必应即自动开始
         showPanel: true,     // 显示控制台
         tolerance: 5         // 连续 N 次未涨积分 → 判定受限并暂停
     };
@@ -204,6 +206,26 @@
                     .catch((e) => { clearTimeout(t); reject(e); });
             }
         });
+    }
+
+    async function panelRequest(action, details = {}) {
+        if (!PANEL_BRIDGE || typeof GM_xmlhttpRequest !== 'function') return null;
+        try {
+            return await new Promise(resolve => {
+                const timer = setTimeout(() => resolve(null), 3500);
+                const done = result => { clearTimeout(timer); resolve(result); };
+                GM_xmlhttpRequest({
+                    method: 'POST', url: PANEL_BRIDGE.url, anonymous: true,
+                    headers: { 'Content-Type': 'application/json', 'X-Rewards-Script': PANEL_BRIDGE.token },
+                    data: JSON.stringify({ action, ...details }),
+                    onload: response => {
+                        try { done(response.status === 200 ? JSON.parse(response.responseText) : null); }
+                        catch { done(null); }
+                    },
+                    onerror: () => done(null), ontimeout: () => done(null), onabort: () => done(null)
+                });
+            });
+        } catch { return null; }
     }
 
     /** 热搜榜 */
@@ -292,10 +314,10 @@
         if (!id) { id = 't' + Math.random().toString(36).slice(2, 9); sessionStorage.setItem('brh_tab', id); }
         return id;
     }
-    function acquireLock(force) {
+    function acquireLock() {
         const l = store.get('lock', null);
         const now = Date.now();
-        if (!force && l && l.id !== tabId() && now - (l.ts || 0) < 120000) return false;
+        if (l && l.id !== tabId() && now - (l.ts || 0) < 120000) return false;
         store.set('lock', { id: tabId(), ts: now });
         return true;
     }
@@ -374,7 +396,7 @@
      * ============================================================ */
     const isRewards = () => location.hostname === 'rewards.bing.com';
     const isSearchPage = () => /\/search\b/.test(location.pathname) || /br_msg=Please-Wait/.test(location.search);
-    const isBingHome = () => !isRewards() && !isSearchPage();
+    const isBingHome = () => !isRewards() && location.pathname === '/';
 
     function readPoints() {
         const sels = ['#id_rc', '.points-container .points', 'mee-rewards-points-balance',
@@ -392,23 +414,109 @@
         const p = readPoints();
         if (p == null) return;
         const st = loadState();
+        const previous = st.pointsNow;
         if (st.pointsBase == null) st.pointsBase = p;
         st.pointsNow = p;
-        if (st.pointsNow > st.pointsBase) st.noPoint = 0;
-        else if (countMiss) st.noPoint = (st.noPoint || 0) + 1;
+        if (previous != null && p > previous) st.noPoint = 0;
+        else if (countMiss && previous != null) st.noPoint = (st.noPoint || 0) + 1;
         saveState(st);
         return st.noPoint;
     }
 
+    const HOLD_TEXT = {
+        needs_login: '微软登录已失效或尚未登录',
+        verification_required: '微软要求完成验证',
+        earning_limited: '微软提示计分受限',
+        account_restricted: '微软提示账号异常或受限'
+    };
+
+    function classifyMessage(text) {
+        if (/verify your identity|prove you.re not a robot|verify you are human|unusual traffic|验证码|安全验证|请验证.{0,6}(?:身份|帐户|账户|账号)/i.test(text)) return 'verification_required';
+        if (/account (?:has been|is) (?:temporarily )?(?:locked|suspended|restricted)|账号(?:已|暂时|被)*(?:锁定|封禁|暂停使用|受限)/i.test(text)) return 'account_restricted';
+        if (/limit on (?:earning|how many points)|(?:earning|search) (?:Microsoft Rewards )?points (?:is|has been) (?:temporarily )?(?:limited|restricted)|积分获取.{0,12}限制|搜索计分.{0,12}限制|赚取积分.{0,12}限制/i.test(text)) return 'earning_limited';
+        if (/session (?:has )?expired|sign in to (?:Microsoft )?Rewards|登录(?:会话)?(?:已)?过期|请登录.{0,12}Rewards/i.test(text)) return 'needs_login';
+        return '';
+    }
+
     function detectRisk() {
         const t = document.title || '';
-        const u = location.href;
-        // 标题 / URL 层面的强特征
-        if (/安全验证|验证码|captcha|verify you are human|unusual traffic/i.test(t)) return true;
-        if (/\/challenge|\/verify|br_msg=Please-Wait/i.test(u)) return true;
-        // 正文只取首屏，且只认强特征短语，避免搜索结果里出现“验证”二字误判
-        const body = (document.body && document.body.innerText || '').slice(0, 800);
-        return /请输入下方字符|unusual traffic|verify you are human|请完成以下验证|请输入验证码/i.test(body);
+        if (/captcha/i.test(t) || /\/challenge|\/verify|br_msg=Please-Wait/i.test(location.pathname + location.search)) return 'verification_required';
+        const notices = $$('[role="alert"], [aria-live="assertive"]').filter(el => !el.closest('#brh-panel'))
+            .map(el => el.innerText || '').join(' ').slice(0, 1500);
+        const body = isRewards() ? (document.body?.innerText || '').slice(0, 1000) : '';
+        return classifyMessage(t + ' ' + notices + ' ' + body);
+    }
+
+    function checkMicrosoftSession() {
+        const visible = detectRisk();
+        if (visible) return Promise.resolve(visible);
+        return new Promise(resolve => {
+            const timer = setTimeout(() => finish('unavailable'), 7000);
+            const finish = result => { clearTimeout(timer); resolve(result); };
+            const check = response => {
+                const final = new URL(response.finalUrl || REWARDS_URL);
+                const body = response.responseText || '';
+                const message = classifyMessage(body.slice(0, 2000));
+                if (message) return finish(message);
+                if (/\/(?:challenge|verify)\b/i.test(final.pathname)) return finish('verification_required');
+                if (response.status === 401 || final.hostname === 'login.live.com'
+                    || final.hostname === 'login.microsoftonline.com') return finish('needs_login');
+                try {
+                    const info = JSON.parse(body);
+                    const user = info.dashboard?.userStatus;
+                    if (!info.isError && response.status === 200 && user?.isRewardsUser !== false
+                        && Number.isInteger(user?.availablePoints)) return finish('');
+                    if (user?.isRewardsUser === false) return finish('needs_login');
+                } catch { /* An unexpected response is not a reason to start. */ }
+                finish('unavailable');
+            };
+            try {
+                const url = 'https://rewards.bing.com/api/getuserinfo';
+                if (typeof GM_xmlhttpRequest === 'function') {
+                    GM_xmlhttpRequest({ method: 'GET', url, timeout: 6500, onload: check,
+                        onerror: () => finish('unavailable'), ontimeout: () => finish('unavailable'),
+                        headers: { Accept: 'application/json' } });
+                } else if (isRewards()) {
+                    fetch(url).then(async response => check({
+                        status: response.status, finalUrl: response.url, responseText: await response.text()
+                    })).catch(() => finish('unavailable'));
+                } else finish('unavailable');
+            } catch { finish('unavailable'); }
+        });
+    }
+
+    async function holdRun(reason) {
+        if (!HOLD_TEXT[reason]) return;
+        const previous = store.get('hold', '');
+        store.set('hold', reason);
+        pauseRun(HOLD_TEXT[reason] + '，已暂停');
+        const result = await panelRequest('hold', { reason });
+        if (!result?.active && previous !== reason) notify('Rewards 助手已暂停', HOLD_TEXT[reason]);
+    }
+
+    async function checkStart() {
+        const state = await panelRequest('status');
+        const held = store.get('hold', '');
+        if (state?.hold || (held && !state?.active)) {
+            setStatus('已暂停，请先在微软官网确认账号状态，再恢复脚本');
+            render();
+            return false;
+        }
+        const reason = await checkMicrosoftSession();
+        if (reason && reason !== 'unavailable') {
+            await holdRun(reason);
+            return false;
+        }
+        if (reason) {
+            setStatus('暂时无法确认微软登录状态，请打开 Rewards 检查');
+            render();
+            return false;
+        }
+        if (held) store.del('hold');
+        const current = loadState();
+        current.sessionCheckedAt = Date.now();
+        saveState(current);
+        return true;
     }
 
     /* ============================================================
@@ -460,12 +568,18 @@
         return `https://www.bing.com/search?q=${encodeURIComponent(q)}&form=${rndStr(4)}&cvid=${hex32()}`;
     }
 
-    const go = (url) => { location.href = url; };
+    function go(url) {
+        const next = new URL(url);
+        if (next.origin !== location.origin) next.hash = 'br-tab=' + tabId();
+        location.href = next.href;
+    }
 
     async function waitCountdown(target) {
         while (Date.now() < target) {
             const st = loadState();
             if (!st.running || st.paused) return false;
+            const risk = detectRisk();
+            if (risk) { await holdRun(risk); return false; }
             await sleep(clamp(target - Date.now(), 150, 1000));
         }
         const st = loadState();
@@ -481,15 +595,20 @@
         if (!isOwnerTab()) { setStatus('另一标签页正在运行'); render(); return; }
         cycleRunning = true;
         try {
-            if (detectRisk()) { pauseRun('检测到验证页，已暂停'); return; }
+            const risk = detectRisk();
+            if (risk) { await holdRun(risk); return; }
+            if (Date.now() - (st0.sessionCheckedAt || 0) >= 60000 && !await checkStart()) {
+                if (!loadState().paused) pauseRun('暂时无法确认微软登录状态，已暂停');
+                return;
+            }
 
             await humanBrowse();
 
             const miss = true;
             const noPoint = updatePoints(miss);
             if (noPoint != null && noPoint >= cfg.tolerance) {
-                pauseRun(`连续 ${noPoint} 次未涨积分，疑似搜索受限，已暂停`);
-                notify('Rewards 已暂停', '连续多次未涨积分，请稍后再试或手动检查账号状态');
+                pauseRun(`连续 ${noPoint} 次未涨积分，已暂停`);
+                notify('Rewards 助手已暂停', '连续多次未涨积分，请到微软官网检查账号状态');
                 return;
             }
 
@@ -509,6 +628,7 @@
             }
 
             st = loadState();
+            if (!st.running || st.paused || !isOwnerTab()) return;
             st.count += 1;
             st.currentWord = word;
             st.nextAt = Date.now() + waitMs;
@@ -532,7 +652,9 @@
                 render();
                 return;
             }
-            go(searchUrl(word));
+            const riskBeforeSearch = detectRisk();
+            if (riskBeforeSearch) { await holdRun(riskBeforeSearch); return; }
+            if (isOwnerTab()) go(searchUrl(word));
         } catch (e) {
             log('流程异常：' + (e && e.message ? e.message : e));
         } finally {
@@ -540,15 +662,24 @@
         }
     }
 
-    async function startRun() {
+    async function startRun(automatic = false, ticket = null) {
+        const initial = loadState();
+        const recovering = automatic && initial.paused && !!store.get('hold', '');
+        if ((initial.running && !recovering) || initial.phase === 'activity'
+            || (automatic && ((initial.paused && !recovering) || initial.phase === 'done' || initial.count >= cfg.target))) return;
+        if (!await checkStart()) return;
         const st = loadState();
+        if ((st.running && !recovering) || st.phase === 'activity' || !acquireLock()) return;
+        if (automatic && !(await panelRequest('claim', { ticket }))?.started) {
+            releaseLock();
+            return;
+        }
         st.running = true;
         st.paused = false;
         st.phase = 'search';
         st.nextAt = 0;
         st.lastStart = Date.now();
         saveState(st);
-        acquireLock(true);
         heartbeatStart();
         log('开始任务');
         render();
@@ -557,6 +688,9 @@
 
         const word = await pickWord();
         const st2 = loadState();
+        if (!st2.running || st2.paused || st2.date !== st.date || !isOwnerTab()) return;
+        const reason = detectRisk();
+        if (reason) { await holdRun(reason); return; }
         st2.count += 1;
         st2.currentWord = word;
         st2.usedWords.push(word);
@@ -575,7 +709,8 @@
         render();
     }
 
-    function resumeRun() {
+    async function resumeRun() {
+        if (!await checkStart() || !acquireLock()) return;
         const st = loadState();
         st.paused = false;
         st.running = true;
@@ -585,7 +720,24 @@
         heartbeatStart();
         log('恢复运行');
         render();
-        if (isSearchPage()) pageCycle();
+        if (st.phase === 'activity') {
+            st.running = false;
+            saveState(st);
+            releaseLock();
+            if (isRewards()) await onRewardsPage();
+            else openRewards();
+        } else await pageCycle();
+    }
+
+    async function startActivities() {
+        const st = loadState();
+        if (st.running || st.phase === 'activity' || !await checkStart()) return;
+        const current = loadState();
+        if (current.running || current.phase === 'activity') return;
+        current.phase = 'activity';
+        current.paused = false;
+        saveState(current);
+        openRewards();
     }
 
     function stopRun() {
@@ -604,7 +756,7 @@
         const st = loadState();
         st.running = false;
         st.paused = false;
-        st.phase = 'activity';
+        st.phase = cfg.autoActivity ? 'activity' : 'done';
         st.nextAt = 0;
         st.status = `搜索任务完成（${st.count}/${cfg.target}）`;
         saveState(st);
@@ -702,6 +854,9 @@
         log(`发现 ${todo.length} 个待做活动，本次打开 ${list.length} 个`);
 
         for (let i = 0; i < list.length; i++) {
+            if (loadState().paused || !isOwnerTab()) return i;
+            const reason = detectRisk();
+            if (reason) { await holdRun(reason); return i; }
             const item = list[i];
             setStatus(`打开活动 ${i + 1}/${list.length}：${item.text}`);
             render();
@@ -876,9 +1031,9 @@
             const act = btn.dataset.act;
             if (act === 'fold') { el.classList.toggle('fold'); btn.textContent = el.classList.contains('fold') ? '+' : '—'; }
             else if (act === 'cfg') { $('.brh-cfg', el).classList.toggle('on'); syncCfgUI(); }
-            else if (act === 'start') { const st = loadState(); if (st.running && st.paused) resumeRun(); else startRun(); }
+            else if (act === 'start') { if (loadState().paused) resumeRun(); else startRun(); }
             else if (act === 'pause') { const st = loadState(); if (st.paused) resumeRun(); else pauseRun('手动暂停'); }
-            else if (act === 'act') { const st = loadState(); st.phase = 'activity'; saveState(st); openRewards(); }
+            else if (act === 'act') { startActivities(); }
             else if (act === 'save') { saveCfgFromUI(); }
         });
 
@@ -960,7 +1115,7 @@
         if (wd) wd.textContent = st.currentWord ? '当前：' + st.currentWord : '';
 
         const startBtn = $('[data-act="start"]', panel);
-        if (startBtn) startBtn.textContent = (st.running && st.paused) ? '继续' : '开始';
+        if (startBtn) startBtn.textContent = st.paused ? '继续' : '开始';
         const pauseBtn = $('[data-act="pause"]', panel);
         if (pauseBtn) pauseBtn.textContent = st.paused ? '继续' : '暂停';
     }
@@ -988,7 +1143,7 @@
 
     function heartbeatStart() {
         const st = loadState();
-        if (st.running) store.set('lock', { id: tabId(), ts: Date.now() });
+        if (st.running && isOwnerTab()) acquireLock();
     }
 
     /* ============================================================
@@ -1015,10 +1170,10 @@
     function registerMenu() {
         if (typeof GM_registerMenuCommand !== 'function') return;
         const reg = (n, f) => { try { GM_registerMenuCommand(n, f); } catch (e) { /* ignore */ } };
-        reg('▶ 开始 / 继续任务', () => { const st = loadState(); if (st.running && st.paused) resumeRun(); else startRun(); });
+        reg('▶ 开始 / 继续任务', () => { if (loadState().paused) resumeRun(); else startRun(); });
         reg('⏸ 暂停任务', () => pauseRun('手动暂停'));
         reg('⏹ 停止任务', () => stopRun());
-        reg('🎯 立即做每日活动', () => { const st = loadState(); st.phase = 'activity'; saveState(st); openRewards(); });
+        reg('🎯 立即做每日活动', startActivities);
         reg('⚙ 打开设置面板', () => {
             if (!cfg.showPanel) { cfg.showPanel = true; saveCfg(); injectPanel(); }
             if (panel) { panel.classList.remove('fold'); $('.brh-cfg', panel).classList.add('on'); syncCfgUI(); }
@@ -1036,9 +1191,13 @@
      * ============================================================ */
     async function onRewardsPage() {
         const st = loadState();
+        if (st.paused || !isOwnerTab()) return;
         if (st.phase === 'activity') {
+            if (!await checkStart() || !acquireLock()) return;
             const n = await doActivities();
             const st2 = loadState();
+            releaseLock();
+            if (st2.paused) return;
             st2.phase = 'done';
             st2.status = n ? `已打开 ${n} 个活动` : '每日活动已处理';
             saveState(st2);
@@ -1054,6 +1213,12 @@
         // 脚本自己打开的活动标签页：只静默挂载，不跑主流程
         if (/#br_act=1/.test(location.hash)) return;
 
+        const continuedTab = location.hash.match(/^#br-tab=(t[a-z0-9]{7})$/)?.[1];
+        if (continuedTab && store.get('lock', null)?.id === continuedTab) {
+            sessionStorage.setItem('brh_tab', continuedTab);
+            history.replaceState(history.state, '', location.pathname + location.search);
+        }
+
         injectPanel();
         render();
 
@@ -1063,13 +1228,16 @@
         startTicker(() => render());
         registerMenu();
 
-        if (isRewards()) { onRewardsPage(); return; }
+        const ticket = location.hash.match(/^#rp-start=([A-Za-z0-9_-]{24})$/)?.[1] || null;
+        if (ticket) history.replaceState(history.state, '', location.pathname + location.search);
+        if ((isBingHome() || (isRewards() && location.pathname === '/dashboard')) && PANEL_BRIDGE) {
+            const remote = await panelRequest('status');
+            if (remote?.active && (ticket ? remote.scheduled : remote.openPage)) await startRun(true, ticket);
+        }
 
+        if (isRewards()) { await onRewardsPage(); return; }
+        if (loadState().paused) return;
         if (isSearchPage()) {
-            if (!st.running && cfg.autoStart && st.phase !== 'done' && st.count < cfg.target) {
-                startRun();
-                return;
-            }
             await pageCycle();
             return;
         }
@@ -1078,8 +1246,6 @@
         if (st.running && !st.paused) {
             await sleep(rand(1200, 2500));
             pageCycle();
-        } else if (cfg.autoStart && st.phase !== 'done' && st.count < cfg.target) {
-            startRun();
         } else {
             render();
         }

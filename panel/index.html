@@ -710,6 +710,16 @@
           <div class="inline card-actions">
             <button class="primary" id="participationScriptGuide">打开安装教程</button>
           </div>
+          <div class="inline card-actions" id="scriptAutomationOptions">
+            <label class="chk"><input type="checkbox" id="scriptOpenPage" disabled>打开页面时自动开始</label>
+            <label class="chk"><input type="checkbox" id="scriptScheduled" disabled>按现有定时计划自动开始</label>
+          </div>
+          <p class="sub card-actions">默认手动。自动启动需要保持面板运行，可最小化到托盘。</p>
+          <p class="sub card-actions" id="scriptAutomationStatus" role="status" hidden></p>
+          <div class="inline card-actions">
+            <button class="ghost" id="resumeScriptTasks" hidden>我已确认账号状态，恢复脚本</button>
+          </div>
+          <p class="sub card-actions" id="scriptAutomationFeedback" role="status" hidden></p>
         </div>
       </section>
 
@@ -1083,14 +1093,16 @@ function renderParticipation(schedule,running){
   $('homeParticipationGroup').hidden=!mode;
   $('homeParticipationMode').textContent=MODE_OPTIONS[mode]?.label||'待选择';
   $('homeParticipation').textContent=mode==='pending'?'选择模式':'管理模式';
-  $('homeScheduleTitle').textContent=automatic?'自动运行':'定时提醒';
+  const scriptScheduled=browserMode&&STATUS?.scriptAutomation?.scheduled;
+  $('homeScheduleTitle').textContent=automatic||scriptScheduled?'自动运行':'定时提醒';
   $('scheduleTitle').textContent=$('homeScheduleTitle').textContent;
-  $('schBootMode').textContent=automatic?'开机运行':'开机提醒';
+  $('schBootMode').textContent=automatic||scriptScheduled?'开机运行':'开机提醒';
   $('schRetryRow').hidden=!automatic;
   $('schCatchLatest').textContent=automatic?'补最近一次':'补最近一次提醒';
   $('schCatchLabel').textContent=automatic?'补跑时限':'补提醒时限';
   $('schCatchNote').textContent='补跑或补提醒的结果会写入运行记录。';
   $('scriptModeSetup').hidden=!browserMode||!windows;
+  renderScriptAutomation(STATUS?.scriptAutomation);
   $('browserPreferenceCard').hidden=!windows;
   $('taskBrowserTitle').textContent=windows?'并发':'浏览器与并发';
   for(const id of ['taskBrowserLabel','browserSel','btnInstall']) $(id).hidden=windows;
@@ -1127,7 +1139,7 @@ function renderHomeSchedule(schedule){
   const enabled=daily || boot;
   const paused=enabled && schedule.paused;
   const daemonMissing=daily && !schedule.daemonAlive;
-  const automatic=schedule.participation==='automatic';
+  const automatic=schedule.participation==='automatic'||(schedule.participation==='browser'&&STATUS?.scriptAutomation?.scheduled);
   const state=schedule.participation==='pending'?'待选择':paused?'已暂停':daily?'每天定时':boot?(automatic?'开机运行':'开机提醒'):'未启用';
   if($('homeScheduleState').textContent!==state) $('homeScheduleState').textContent=state;
   $('homeScheduleState').classList.toggle('needs_login',paused);
@@ -1184,6 +1196,7 @@ function renderNotifications(result){
 function renderSchedule(sc){
   if(!sc) return;
   const automatic=sc.participation==='automatic';
+  const scriptScheduled=sc.participation==='browser'&&STATUS?.scriptAutomation?.scheduled;
   SCH_MODE = sc.mode || 'manual';
   if(!SCH_DIRTY && !$('timeRows').contains(document.activeElement) && Array.isArray(sc.times) && sc.times.length){
     SCH_TIMES = sc.times.slice();
@@ -1203,7 +1216,8 @@ function renderSchedule(sc){
   $('schChoose').hidden=$('schTomorrow').hidden;
   const supportsBoot=sc.supportsBoot!==false;
   $('schBootMode').style.display=supportsBoot?'':'none';
-  $('schHint').textContent = sc.participation==='pending'?'选择参与模式后，定时计划会按所选模式生效。':sc.paused ? (supportsBoot?'定时已暂停，可以从这里或托盘菜单恢复。':'定时已暂停，可以从这里恢复。') : !automatic
+  $('schHint').textContent = sc.participation==='pending'?'选择参与模式后，定时计划会按所选模式生效。':sc.paused ? (supportsBoot?'定时已暂停，可以从这里或托盘菜单恢复。':'定时已暂停，可以从这里恢复。') : scriptScheduled
+    ? (SCH_MODE==='manual'?'还没有启用定时计划。':'到点打开所选浏览器，由 Rewards 助手运行。请保持面板运行。') : !automatic
     ? {manual:'未安排定时提醒。',daily:supportsBoot?'到点发送 Windows 提醒，关闭面板后仍生效。':'服务运行时，到点记录到通知中心。',boot:'开机登录后发送 Windows 提醒。'}[SCH_MODE]
     : SCH_MODE==='manual'
     ? '只在你点「开始任务」时执行'
@@ -1213,7 +1227,7 @@ function renderSchedule(sc){
   const flags = ((sc.daily?'定时 ':'') + (sc.boot?'开机 ':'')).trim() || '未写入';
   const doneList = (sc.doneToday || []);
   const rows = [
-    [sc.paused ? '暂停至' : automatic?'下次运行':'下次提醒', sc.paused ? sc.pauseUntil || '手动恢复' : sc.nextRun || '—'],
+    [sc.paused ? '暂停至' : automatic||scriptScheduled?'下次运行':'下次提醒', sc.paused ? sc.pauseUntil || '手动恢复' : sc.nextRun || '—'],
     ['今日已处理', doneList.length ? doneList.join('、') : '—'],
     ['守护进程', sc.daemonAlive ? '运行中' : '未运行'],
     ...(supportsBoot?[['开机启动项', flags]]:[]),
@@ -2540,6 +2554,7 @@ async function loadBrowserPreferences(){
     const setup=await response.json();
     if(!setup.ok) throw new Error(setup.msg||'无法读取浏览器设置');
     browserSetup=setup;
+    if(PAGE==='participation') renderScriptAutomation(setup.scriptAutomation);
     browserFeedback('browserPreferenceFeedback',setup.available[setup.browser]?'':'所选浏览器不可用，请重新选择。');
     if(!setup.scriptUrl) browserFeedback('scriptGuideFeedback','当前安装缺少 Rewards 助手脚本，请检查软件文件。');
   }catch(error){
@@ -2547,6 +2562,37 @@ async function loadBrowserPreferences(){
     browserFeedback('scriptGuideFeedback','无法读取浏览器设置，请重新打开教程。');
   }
   renderBrowserPreferences();
+}
+
+let scriptAutomationBusy=false;
+
+function renderScriptAutomation(state){
+  if(scriptAutomationBusy) return;
+  $('scriptOpenPage').disabled=$('scriptScheduled').disabled=!state;
+  $('scriptOpenPage').checked=!!state?.openPage;
+  $('scriptScheduled').checked=!!state?.scheduled;
+  $('resumeScriptTasks').hidden=!state?.hold;
+  browserFeedback('scriptAutomationStatus',state?.hold ? state.hold+'，脚本已暂停。'
+    : state?.unanswered ? '脚本没有接到上一次定时请求。请检查所选浏览器中的脚本版本和权限。' : '');
+}
+
+async function saveScriptAutomation(){
+  if(scriptAutomationBusy) return;
+  const openPage=$('scriptOpenPage').checked, scheduled=$('scriptScheduled').checked;
+  scriptAutomationBusy=true;
+  $('scriptOpenPage').disabled=$('scriptScheduled').disabled=true;
+  try{
+    if((openPage||scheduled)&&!await confirmRisk()) return;
+    const result=await post('/api/browser-script/settings',{openPage,scheduled});
+    if(!result.ok) throw new Error(result.msg||'无法保存启动方式');
+    STATUS.scriptAutomation=result.scriptAutomation;
+    browserFeedback('scriptAutomationFeedback',openPage||scheduled?'已保存自动启动方式。':'已切回手动启动。');
+  }catch(error){
+    browserFeedback('scriptAutomationFeedback',error.message||'无法保存启动方式');
+  }finally{
+    scriptAutomationBusy=false;
+    renderScriptAutomation(STATUS?.scriptAutomation);
+  }
 }
 
 function openScriptGuide(){
@@ -2613,6 +2659,20 @@ $('copyRewardsScript').onclick=async()=>{
     input.select();
     browserFeedback('scriptGuideFeedback','请按 Ctrl+C 复制选中的链接，再粘贴到 Tampermonkey。');
   }
+};
+$('scriptOpenPage').onchange=saveScriptAutomation;
+$('scriptScheduled').onchange=saveScriptAutomation;
+$('resumeScriptTasks').onclick=async()=>{
+  $('resumeScriptTasks').disabled=true;
+  try{
+    const result=await post('/api/browser-script/resume',{confirmed:true});
+    if(!result.ok) throw new Error(result.msg||'无法恢复脚本');
+    STATUS.scriptAutomation=result.scriptAutomation;
+    renderScriptAutomation(result.scriptAutomation);
+    browserFeedback('scriptAutomationFeedback','已解除暂停。活动中断时，可在网页的助手面板点「继续」。');
+  }catch(error){
+    browserFeedback('scriptAutomationFeedback',error.message||'无法恢复脚本');
+  }finally{ $('resumeScriptTasks').disabled=false; }
 };
 
 async function chooseParticipation(event){
