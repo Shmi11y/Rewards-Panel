@@ -29,7 +29,7 @@ ROOT = Path(__file__).resolve().parent
 # The portable Python's ._pth file excludes the script directory.
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
-from windows_notifications import AUMID, REWARDS_DASHBOARD, parse_activation, register_shortcut, run_scheme
+from windows_notifications import AUMID, parse_activation, register_shortcut, run_scheme
 
 ACTIVATION = parse_activation(sys.argv[1:]) if __name__ == "__main__" and len(sys.argv) > 1 else None
 if __name__ == "__main__" and len(sys.argv) > 1 and ACTIVATION is None:
@@ -105,11 +105,12 @@ def page_url() -> str:
 
 def api(path: str, method: str = "GET", body: dict | None = None, *, timeout: float = 8) -> dict:
     t = token()
-    url = f"{URL}{path}{'&' if '?' in path else '?'}k={t}" if t else f"{URL}{path}"
+    headers = {"Content-Type": "application/json"}
+    if t:
+        headers["Cookie"] = f"rw_token={t}"
     try:
         data = json.dumps(body).encode() if body is not None else None
-        req = urllib.request.Request(url, data=data, method=method,
-                                     headers={"Content-Type": "application/json"})
+        req = urllib.request.Request(f"{URL}{path}", data=data, method=method, headers=headers)
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             return json.loads(resp.read().decode("utf-8"))
     except Exception as exc:  # noqa: BLE001
@@ -152,11 +153,11 @@ def make_tray(open_panel, open_pause_picker, exit_app):
             ctypes.windll.user32.MessageBoxW(0, msg, TITLE, 0x30)
 
     def open_rewards() -> None:
-        try:
-            os.startfile(REWARDS_DASHBOARD)
-        except OSError as exc:
-            _log(f"无法打开微软 Rewards: {exc}")
-            ctypes.windll.user32.MessageBoxW(0, "无法打开微软 Rewards，请检查默认浏览器设置。", TITLE, 0x30)
+        result = api("/api/rewards/dashboard", "POST", {})
+        if not result.get("ok"):
+            message = result.get("msg") or "无法打开微软 Rewards，请检查浏览器设置。"
+            _log(message)
+            ctypes.windll.user32.MessageBoxW(0, message, TITLE, 0x30)
 
     return Tray(ICO, open_panel, lambda: api("/api/schedule", timeout=2),
                 pause_schedule, open_pause_picker, exit_app, _log, open_rewards=open_rewards)
@@ -412,7 +413,20 @@ def bundled_webview_runtime() -> Path | None:
 
 
 def fallback_chromium() -> int:
-    found = sorted((ROOT / "browser").glob("chromium-*/chrome-win64/chrome.exe"))
+    browser_pattern = "chromium-*/chrome-win64/chrome.exe"
+    found = sorted((ROOT / "browser").glob(browser_pattern))
+    if not found:
+        from portable_launcher import install_chromium
+
+        node = ROOT / "app" / "node.exe"
+        cli = ROOT / "app" / "node_modules" / "patchright" / "cli.js"
+        if node.is_file() and cli.is_file():
+            try:
+                env = dict(os.environ, PLAYWRIGHT_BROWSERS_PATH=str(ROOT / "browser"))
+                install_chromium(node, cli, env)
+            except (OSError, subprocess.SubprocessError) as exc:
+                _log(f"无法准备桌面备用 Chromium: {exc}")
+            found = sorted((ROOT / "browser").glob(browser_pattern))
     if not found:
         print("找不到内置浏览器，也无法使用 pywebview")
         return 1

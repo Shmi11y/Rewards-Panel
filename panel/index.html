@@ -20,7 +20,7 @@
   .logo{width:32px;height:32px;border-radius:10px;background:linear-gradient(135deg,var(--accent),var(--accent2));display:grid;place-items:center;font-weight:600;font-size:15px;color:#fff}
   .brand b{font-size:16px;font-weight:600}
   nav{flex:1;display:flex;flex-direction:column;gap:3px}
-  .navitem{display:flex;align-items:center;gap:11px;padding:9px 12px;color:var(--muted);cursor:pointer;border-radius:10px;font-size:13.5px;transition:.12s}
+  .navitem{background:none;border:0;text-align:left;display:flex;align-items:center;gap:11px;padding:9px 12px;color:var(--muted);cursor:pointer;border-radius:10px;font-size:13.5px;transition:.12s}
   .navitem:hover{color:var(--text);background:var(--panel2)}
   .navitem.on{color:var(--accent);background:var(--accentS);font-weight:500}
   .ic{width:7px;height:7px;border-radius:50%;background:currentColor;opacity:.45}
@@ -39,6 +39,7 @@
   header>button svg{width:10px;height:10px}
   header .wb{width:36px;height:30px;border-radius:8px}
   header .wb svg{width:13px;height:13px}
+  header h1,header button{white-space:nowrap}
   .accpick{appearance:none;-webkit-appearance:none;background:var(--panel2);border:1px solid var(--line);
     border-radius:999px;padding:6px 30px 6px 14px;font:inherit;font-size:12.5px;color:var(--muted);
     cursor:pointer;max-width:230px;text-overflow:ellipsis;transition:.15s;
@@ -127,9 +128,45 @@
   .run-dialog::backdrop{background:rgba(16,23,36,.5)}
   .run-dialog-head{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px}
   .run-dialog-head h2{margin:0;font-size:17px}
+  .script-guide-steps{display:grid;gap:14px;margin:16px 0 0;padding-left:22px}
+  .script-guide-steps li>.sub{margin-top:4px}
+  .script-guide-steps li>button,.script-guide-steps li>input{margin-top:8px}
+  #scriptInstallUrl{width:100%}
+  #scriptGuideChangeBrowser[hidden],#browserSel[hidden],#taskBrowserLabel[hidden],#btnInstall[hidden]{display:none}
   #participationDialog{width:min(440px,calc(100% - 44px))}
-  .participation-help{margin-top:14px;line-height:1.65}
-  .participation-help p{margin:6px 0 0}
+  .mode-options{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(220px,100%),1fr));gap:12px}
+  #participationDialog .mode-options{grid-template-columns:1fr;gap:8px}
+  .mode-choice{display:flex;flex-direction:column;gap:5px;text-align:left;white-space:normal;align-items:flex-start;
+    background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:12px;padding:14px}
+  .mode-choice.on{border-color:var(--accent);background:var(--accentS)}
+  .mode-choice strong{font-size:14px}
+  .mode-choice .sub{line-height:1.55}
+  .mode-choice .mode-current{color:var(--accent);font-weight:600;font-size:12px}
+  #btnRun[data-mode="reminder"]{background:var(--panel);border-color:var(--line2);color:var(--text);box-shadow:none}
+  #btnRun[data-mode="browser"]{background:#5d46cf;border-color:#5d46cf}
+  #taskConfig{border:0;padding:0;margin:0;min-width:0}
+  #taskConfig:disabled{opacity:.6}
+  .history-card+.history-card,#browserPreferenceCard,#scriptModeSetup{margin-top:18px}
+  .history-card summary{cursor:pointer}
+  .history-results{overflow:auto}
+  #notificationList{display:grid;gap:8px;margin-top:14px}
+  .notice-row{width:100%;display:block;text-align:left;white-space:normal;padding:10px 13px}
+  .notice-head{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap}
+  @media(max-width:880px){
+    #app{grid-template-columns:132px minmax(0,1fr)}
+    aside{padding-inline:9px}
+    .brand{gap:7px;padding-inline:4px}
+    .brand b{font-size:14px}
+    .content{padding-inline:16px}
+    header{padding:10px 12px;gap:7px}
+    header h1{font-size:17px;overflow:hidden;text-overflow:ellipsis;flex:0 1 auto}
+    header .accpick{max-width:94px}
+    header .vsep{display:none}
+    header .winbar{margin-left:0;padding-left:6px}
+    header .wb{width:27px}
+    header>button{padding-inline:8px}
+  }
+  @media(max-width:660px){header{flex-wrap:wrap}header h1{flex-basis:100%}}
   #participationHint{margin:0 0 14px}
   .card-actions{margin-top:14px}
   #schedulePauseDialog{width:min(420px,calc(100% - 44px))}
@@ -365,12 +402,14 @@
   <aside>
     <div class="brand"><img class="logo" src="/assets/icon.png" alt=""><b>Rewards</b></div>
     <nav>
-      <div class="navitem on" data-nav="home"><i class="ic"></i>总览</div>
-      <div class="navitem" data-nav="accounts"><i class="ic"></i>账号</div>
-      <div class="navitem" data-nav="detail"><i class="ic"></i>明细</div>
-      <div class="navitem" data-nav="logs"><i class="ic"></i>日志</div>
-      <div class="navitem" data-nav="settings"><i class="ic"></i>设置</div>
-      <div class="navitem" data-nav="about"><i class="ic"></i>关于</div>
+      <button class="navitem on" data-nav="home"><i class="ic"></i>总览</button>
+      <button class="navitem" data-nav="accounts"><i class="ic"></i>账号</button>
+      <button class="navitem" data-nav="participation"><i class="ic"></i>参与模式</button>
+      <button class="navitem" data-nav="settings"><i class="ic"></i>任务设置</button>
+      <button class="navitem" data-nav="schedule"><i class="ic"></i>定时计划</button>
+      <button class="navitem" data-nav="history"><i class="ic"></i>运行记录</button>
+      <button class="navitem" data-nav="logs"><i class="ic"></i>日志</button>
+      <button class="navitem" data-nav="about"><i class="ic"></i>关于</button>
     </nav>
     
     <div class="sidefoot">
@@ -397,7 +436,7 @@
       <span class="spacer"></span>
       <button id="btnRun" class="primary">
         <svg id="btnRunIcon" viewBox="0 0 12 12" width="11" height="11" style="margin-right:5px" hidden><path d="M3 2l7 4-7 4z" fill="currentColor"/></svg><span id="btnRunLabel">打开微软 Rewards ↗</span></button>
-      <button id="btnStop" class="ghost">
+      <button id="btnStop" class="ghost" hidden>
         <svg viewBox="0 0 12 12" width="10" height="10" style="margin-right:5px"><rect x="2.5" y="2.5" width="7" height="7" rx="1.4" fill="currentColor"/></svg>停止</button>
       <span class="vsep"></span>
       <div class="winbar">
@@ -422,7 +461,7 @@
           <div><div class="k">计分动作</div><div class="v" id="sCount">—</div><div class="sub">今日已完成项目</div></div>
           <div><div class="k">登录会话</div><div class="v" id="sSession" style="font-size:18px;margin-top:8px">—</div><div class="sub" id="sSessionSub">—</div></div>
         </div>
-        <button class="card recent-run" id="recentRunButton" aria-haspopup="dialog" aria-controls="runHistoryDialog">
+        <button class="card recent-run" id="recentRunButton" aria-controls="runHistoryList">
           <strong>最近运行</strong>
           <span class="run-meta" id="recentRunMeta">暂无运行记录</span>
           <span class="run-status" id="recentRunStatus"></span>
@@ -438,7 +477,7 @@
           </div>
           <div class="home-participation" id="homeParticipationGroup" hidden>
             <span class="k" id="homeParticipationMode" role="status"></span>
-            <button class="ghost sm" id="homeParticipation" aria-haspopup="dialog" aria-controls="participationDialog">切换模式</button>
+            <button class="ghost sm" id="homeParticipation">管理模式</button>
           </div>
           <div class="home-schedule-actions" id="homeScheduleActions" hidden>
             <button class="ghost sm" id="homeScheduleTomorrow" hidden>暂停到明天</button>
@@ -446,15 +485,10 @@
             <button class="ghost sm" id="homeScheduleResume" hidden>恢复定时</button>
           </div>
         </div>
-        <div class="card" style="margin-bottom:18px">
-          <div class="ph" style="margin-bottom:6px"><h2 style="margin:0">积分曲线</h2><span class="sub" id="phaseText" style="margin:0"></span></div>
-          <svg class="spark" id="spark" viewBox="0 0 600 120" preserveAspectRatio="none"></svg>
-        </div>
-        <div class="row c2">
+        <div class="row c2 top">
           <div class="card">
-            <h2>最近动作</h2>
-            <table><tbody id="recentRows"></tbody></table>
-            <div class="empty" id="recentEmpty">暂无记录</div>
+            <div class="ph" style="margin-bottom:6px"><h2 style="margin:0">积分曲线</h2><span class="sub" id="phaseText" style="margin:0"></span></div>
+            <svg class="spark" id="spark" viewBox="0 0 600 120" preserveAspectRatio="none"></svg>
           </div>
           <div class="card">
             <h2>今日配额</h2>
@@ -507,33 +541,38 @@
         <div class="empty" id="accEmpty">还没有账号。点「添加账号」，在弹出的窗口里登录一次，之后不用再输密码。</div>
       </section>
 
-      <section data-page="detail">
-        <div class="card" style="margin-bottom:14px">
-          <div class="toolbar">
+      <section data-page="history">
+        <div class="card history-card">
+          <h2>最近 7 天的运行记录</h2>
+          <p id="runHistoryFeedback" class="sub" role="status" hidden></p>
+          <div id="runHistoryList"></div>
+        </div>
+        <details class="card history-card" id="pointsDetail">
+          <summary>积分明细与异常</summary>
+          <div class="toolbar card-actions">
             <input id="dSearch" class="tin" placeholder="搜索活动名…">
             <label class="chk"><input type="checkbox" id="dOnlyGain">只看有积分的</label>
             <span class="k" id="dCount"></span>
             <span class="spacer"></span>
             <button class="ghost sm" id="dExport">导出 CSV</button>
           </div>
-        </div>
-        <div class="card">
-          <h2>全部动作</h2>
-          <table>
+          <table class="card-actions">
             <thead><tr><th>时间</th><th>活动</th><th style="text-align:right">得分</th><th style="text-align:right">余额</th></tr></thead>
             <tbody id="allRows"></tbody>
           </table>
           <div class="empty" id="allEmpty">暂无记录</div>
-        </div>
-        <div class="card" style="margin-top:14px">
-          <h2>异常</h2>
+          <h2 class="card-actions">异常</h2>
           <div id="errBox"><div class="empty">无</div></div>
-        </div>
+        </details>
       </section>
 
       <section data-page="logs">
         <div class="card">
           <div class="toolbar" style="margin-bottom:12px">
+            <select id="logSource" class="tin" aria-label="日志来源" style="width:132px">
+              <option value="task">任务日志</option><option value="startup">启动日志</option>
+              <option value="browser">浏览器配置</option><option value="scheduler">定时守护</option>
+            </select>
             <select id="logLevel" class="tin" style="width:126px">
               <option value="">全部级别</option>
               <option value="error">仅错误</option>
@@ -602,7 +641,7 @@
               <h2>使用风险与免责声明</h2>
               <p class="sub">本程序仅供学习与交流，是独立的第三方项目。使用者应遵守微软 Rewards 条款，自行判断并承担使用风险。微软可能限制计分或兑换、停用 Rewards 账号或取消积分。</p>
               <p class="sub">微软规定每人只能使用一个 Rewards 账号，每户最多六个。家庭成员分别使用自己的账号和同一人使用多个账号赚分是两种情况。微软公开条款未规定共用设备本身会导致自动停用。</p>
-              <p class="sub">微软禁止使用机器人、宏或其他自动化方式赚取积分。你可以使用「仅查看与提醒」，在微软官网自行完成活动。</p>
+              <p class="sub">微软禁止使用机器人、宏或其他自动化方式赚取积分。你可以使用「手动模式」，在微软官网自行完成活动。</p>
               <div class="inline card-actions">
                 <a class="button-link ghost sm" href="https://www.microsoft.com/en/servicesagreement/" target="_blank" rel="noopener noreferrer">微软服务协议 ↗</a>
                 <a class="button-link ghost sm" href="https://support.microsoft.com/en-us/accounts-billing/rewards/getting-the-most-out-of-microsoft-rewards" target="_blank" rel="noopener noreferrer">账号政策 ↗</a>
@@ -625,6 +664,10 @@
                 <button class="ghost" id="btnClean">清理缓存<span class="sub" id="cacheSize" style="margin-left:6px"></span></button>
               </div>
             </div>
+            <div class="card" id="windowPreferences">
+              <h2>窗口</h2>
+              <label class="chk" id="trayPreference"><input type="checkbox" id="keepInTray">关闭窗口后留在托盘</label>
+            </div>
             <div class="card">
               <h2>设置备份</h2>
               <p class="sub">备份仅包含任务设置、定时计划和界面偏好。账号、密码、登录会话和运行记录留在本机。</p>
@@ -635,6 +678,37 @@
               </div>
               <div class="sub" id="backupStatus" role="status" style="margin-top:8px"></div>
             </div>
+            <details class="card" id="licenseDetails">
+              <summary>许可证与第三方声明</summary>
+              <pre class="logbox run-log card-actions" id="licenseText" tabindex="0" aria-label="许可证与第三方声明"></pre>
+            </details>
+          </div>
+        </div>
+      </section>
+
+      <section data-page="participation">
+        <div class="mode-options" id="participationPageOptions" role="group" aria-label="选择参与模式"></div>
+        <p class="sub card-actions" id="participationPageFeedback" role="status" hidden></p>
+        <div class="card" id="browserPreferenceCard" hidden>
+          <h2>浏览器</h2>
+          <p class="sub">适用于三种参与模式。打开 Rewards 时默认跟随 Windows 设置。</p>
+          <div class="inline card-actions">
+            <label for="browserPreference">使用浏览器</label>
+            <select id="browserPreference" disabled>
+              <option value="default">系统默认浏览器</option>
+              <option value="msedge">Microsoft Edge</option>
+              <option value="chrome">Google Chrome</option>
+              <option value="chromium">内置 Chromium（备用）</option>
+            </select>
+            <button class="ghost" id="downloadBackupBrowser" hidden>下载备用 Chromium</button>
+          </div>
+          <p class="sub card-actions" id="browserPreferenceFeedback" role="status" hidden></p>
+        </div>
+        <div class="card" id="scriptModeSetup" hidden>
+          <h2>油猴脚本安装</h2>
+          <p class="sub">用本机 Edge 或 Chrome 安装 Tampermonkey，再添加「Rewards 助手」脚本。</p>
+          <div class="inline card-actions">
+            <button class="primary" id="participationScriptGuide">打开安装教程</button>
           </div>
         </div>
       </section>
@@ -643,9 +717,10 @@
         <div class="tabs" id="setTabs">
           <div class="tab on" data-tab="t1">任务</div>
           <div class="tab" data-tab="t2">节奏与运行</div>
-          <div class="tab" data-tab="t3">定时计划</div>
           <div class="acts" id="taskConfigActions"><button class="ghost sm" id="cfgReload">重新载入</button><button class="primary sm" id="cfgSave">保存设置</button></div>
         </div>
+        <p class="sub" id="taskConfigHint" hidden style="margin-bottom:14px">切换到全自动模式后可编辑任务选项。</p>
+        <fieldset id="taskConfig" disabled aria-label="全自动任务选项">
         <div class="pane on" data-pane="t1">
         <div class="card" >
           <div class="ph">
@@ -687,9 +762,9 @@
           <div class="inline" id="inlineToggles"></div>
         </div>
         <div class="card" >
-          <h2>浏览器与并发</h2>
+          <h2 id="taskBrowserTitle">浏览器与并发</h2>
           <div class="inline">
-            <span class="k">浏览器</span>
+            <label class="k" id="taskBrowserLabel" for="browserSel">浏览器</label>
             <select id="browserSel" class="tin" style="width:186px">
               <option value="chromium">内置内核（推荐）</option>
               <option value="chrome">系统 Chrome</option>
@@ -702,12 +777,11 @@
             
           </div>
         </div>
-        <div class="card">
-          <h2>窗口</h2>
-          <label class="chk" id="trayPreference"><input type="checkbox" id="keepInTray">关闭窗口后留在托盘（默认）</label>
         </div>
-        </div>
-        <div class="pane" data-pane="t3">
+        </fieldset>
+      </section>
+
+      <section data-page="schedule">
         <div class="row c2">
           <div class="card">
             <h2 id="scheduleTitle">定时提醒</h2>
@@ -746,6 +820,8 @@
               <button class="primary" id="schSave">保存定时</button>
               <button class="ghost" id="schSkip">今天跳过</button>
               <button class="ghost" id="schResume" hidden>恢复定时</button>
+              <button class="ghost" id="schTomorrow" hidden>暂停到明天</button>
+              <button class="ghost" id="schChoose" hidden>暂停到指定时间</button>
             </div>
             <div class="kv" id="schInfo" style="margin-top:16px"></div>
           </div>
@@ -753,7 +829,6 @@
             <h2>运行环境</h2>
             <div class="kv" id="envBox"></div>
           </div>
-        </div>
         </div>
       </section>
     </div>
@@ -809,15 +884,6 @@
     </div>
   </div>
 </div>
-<dialog class="run-dialog" id="runHistoryDialog" aria-labelledby="runHistoryTitle">
-  <div class="run-dialog-head">
-    <h2 id="runHistoryTitle">最近 7 天的运行记录</h2>
-    <form method="dialog"><button class="ghost sm" autofocus>关闭</button></form>
-  </div>
-  <p id="runHistoryFeedback" class="sub" role="status" hidden></p>
-  <div id="runHistoryList"></div>
-</dialog>
-
 <dialog class="run-dialog" id="riskDialog" aria-labelledby="riskTitle" aria-describedby="riskText">
   <form method="dialog">
     <h2 id="riskTitle">使用风险</h2>
@@ -832,20 +898,37 @@
 <dialog class="run-dialog" id="participationDialog" aria-labelledby="participationTitle">
   <div class="run-dialog-head">
     <h2 id="participationTitle">参与模式</h2>
-    <form method="dialog"><button class="ghost sm" autofocus>关闭</button></form>
   </div>
   <p class="sub" id="participationHint" hidden>选择后，已有账号和定时计划会保留。</p>
-  <div class="seg" id="participationMode" role="group" aria-label="选择参与模式">
-    <button data-participation="reminder" aria-pressed="false">仅查看与提醒</button>
-    <button data-participation="browser" aria-pressed="false">浏览器辅助</button>
-    <button data-participation="automatic" aria-pressed="false">自动任务</button>
-  </div>
-  <div class="sub participation-help">
-    <p><strong>仅查看与提醒</strong>　查看积分，按计划接收提醒。</p>
-    <p><strong>浏览器辅助</strong>　打开微软 Rewards，任务由你手动点击，面板负责提醒和记录。</p>
-    <p><strong>自动任务</strong>　手动启动任务，已启用的定时和开机计划也会自动执行。</p>
-  </div>
+  <div class="mode-options" id="participationMode" role="group" aria-label="选择参与模式"></div>
   <p class="err" id="participationError" role="alert" hidden></p>
+</dialog>
+
+<dialog class="run-dialog" id="scriptGuideDialog" aria-labelledby="scriptGuideTitle">
+  <div class="run-dialog-head">
+    <h2 id="scriptGuideTitle">油猴脚本安装教程</h2>
+    <form method="dialog"><button class="ghost sm" autofocus>关闭</button></form>
+  </div>
+  <p class="sub" id="scriptGuideBrowserNote"></p>
+  <button class="ghost sm card-actions" id="scriptGuideChangeBrowser" hidden>前往浏览器设置</button>
+  <ol class="script-guide-steps">
+    <li>
+      <strong>安装 Tampermonkey</strong>
+      <p class="sub">在所选浏览器的官方商店添加扩展。</p>
+      <button class="ghost sm" id="openTampermonkeyInstall" disabled>打开官方商店 ↗</button>
+    </li>
+    <li>
+      <strong>允许运行用户脚本</strong>
+      <p class="sub">右键 Tampermonkey 图标，选择「管理扩展程序」，找到「允许运行用户脚本」并开启。</p>
+    </li>
+    <li>
+      <strong>安装 Rewards 助手</strong>
+      <p class="sub">复制脚本链接，在 Tampermonkey 的「管理面板 → 实用工具 → 从 URL 安装」粘贴并确认安装。安装时保持本应用运行，装好后用总览的「打开 Rewards」进入页面。</p>
+      <button class="primary sm" id="copyRewardsScript" disabled>复制脚本链接</button>
+      <input type="text" id="scriptInstallUrl" aria-label="脚本安装链接" readonly hidden>
+    </li>
+  </ol>
+  <p class="sub card-actions" id="scriptGuideFeedback" role="status" hidden></p>
 </dialog>
 
 <dialog class="run-dialog" id="runLogDialog" aria-labelledby="runLogTitle">
@@ -950,6 +1033,18 @@ const RISK_TEXT='本程序仅供学习与交流。微软禁止使用机器人、
 let riskConfirmationPending=false;
 let riskAcknowledgedHere=false;
 let participationSwitchPending=false;
+let modeOnboarding=false;
+const MODE_OPTIONS={
+  reminder:{label:'手动模式',description:'在浏览器中自行完成活动，面板负责余额、账号状态和定时提醒。'},
+  browser:{label:'油猴脚本模式',description:'在本机 Edge 或 Chrome 中使用 Tampermonkey 脚本。自动搜索或点击存在账号风险。'},
+  automatic:{label:'全自动模式',description:'由任务引擎执行启用的任务，可按计划运行。自动化可能导致计分受限或账号停用。'}
+};
+for(const id of ['participationPageOptions','participationMode']){
+  $(id).innerHTML=Object.entries(MODE_OPTIONS).map(([key,mode])=>
+    '<button class="mode-choice" type="button" data-participation="'+key+'" aria-pressed="false">'
+    +'<strong>'+mode.label+'</strong><span class="sub">'+mode.description+'</span>'
+    +'<span class="mode-current" hidden>当前模式</span></button>').join('');
+}
 
 async function confirmRisk(){
   if(riskAcknowledgedHere || STATUS?.riskAcknowledged) return true;
@@ -980,28 +1075,34 @@ function renderParticipation(schedule,running){
   const mode=schedule?.participation;
   const automatic=mode==='automatic';
   const browserMode=mode==='browser';
-  $('btnRunLabel').textContent=automatic?'开始任务':browserMode?'打开并辅助记录 ↗':'打开微软 Rewards ↗';
-  $('btnRunIcon').toggleAttribute('hidden',!automatic);
+  const windows=STATUS?.app?.platform==='windows';
+  $('btnRun').dataset.mode=mode||'reminder';
+  $('btnRunLabel').textContent=automatic?'开始任务':'打开 Rewards ↗';
+  $('btnRunIcon').hidden=!automatic;
   $('btnStop').hidden=!automatic&&!running;
   $('homeParticipationGroup').hidden=!mode;
-  $('homeParticipationMode').textContent=automatic?'自动任务':browserMode?'浏览器辅助':mode==='reminder'?'仅查看与提醒':'';
-  $('homeParticipationMode').hidden=mode==='pending';
-  $('homeParticipation').textContent=mode==='pending'?'选择模式':'切换模式';
-  $('homeParticipation').disabled=running||participationSwitchPending;
-  $('homeParticipation').title=running?'任务结束后可切换模式':'';
+  $('homeParticipationMode').textContent=MODE_OPTIONS[mode]?.label||'待选择';
+  $('homeParticipation').textContent=mode==='pending'?'选择模式':'管理模式';
   $('homeScheduleTitle').textContent=automatic?'自动运行':'定时提醒';
   $('scheduleTitle').textContent=$('homeScheduleTitle').textContent;
-  $('schBootMode').textContent=automatic?'开机自动':'开机提醒';
+  $('schBootMode').textContent=automatic?'开机运行':'开机提醒';
   $('schRetryRow').hidden=!automatic;
   $('schCatchLatest').textContent=automatic?'补最近一次':'补最近一次提醒';
   $('schCatchLabel').textContent=automatic?'补跑时限':'补提醒时限';
-  $('schCatchNote').textContent=automatic?'关机或休眠后的补跑和跳过结果会显示在首页「最近运行」。':'错过定时后的提醒和跳过记录会显示在首页「最近运行」。';
-  $('participationHint').hidden=mode!=='pending';
-  $('participationMode').querySelectorAll('button').forEach(button=>{
+  $('schCatchNote').textContent='补跑或补提醒的结果会写入运行记录。';
+  $('scriptModeSetup').hidden=!browserMode||!windows;
+  $('browserPreferenceCard').hidden=!windows;
+  $('taskBrowserTitle').textContent=windows?'并发':'浏览器与并发';
+  for(const id of ['taskBrowserLabel','browserSel','btnInstall']) $(id).hidden=windows;
+  $('taskConfig').disabled=!automatic;
+  $('taskConfigHint').hidden=automatic;
+  $('cfgSave').disabled=!automatic;
+  document.querySelectorAll('.mode-options button[data-participation]').forEach(button=>{
     const selected=button.dataset.participation===mode;
     button.classList.toggle('on',selected);
     button.setAttribute('aria-pressed',String(selected));
-    button.disabled=running||participationSwitchPending;
+    button.querySelector('.mode-current').hidden=!selected;
+    button.disabled=running||participationSwitchPending||(button.dataset.participation==='browser'&&!windows&&!browserMode);
   });
 }
 
@@ -1072,12 +1173,11 @@ function renderNotifications(result){
     '<label class="chk"><input type="checkbox" value="'+key+'"'+(result.muted.includes(key)?'':' checked')+'>'+label+'</label>').join('');
   const visible=result.notifications.filter(item=>!result.muted.includes(item.category));
   $('notificationList').innerHTML=visible.length?visible.map(item=>{
-    const body='<b>'+esc(item.title)+'</b><span class="sub"> · '+RUN_TIME.format(new Date(item.createdAt*1000))+'</span>'
-      +'<p class="sub">'+esc(item.message)+'</p>';
-    return '<div class="run-entry-body">'+(item.category==='reminder'
-      ?'<a class="button-link ghost" href="'+REWARDS_DASHBOARD+'" target="_blank" rel="noopener noreferrer" data-rewards-dashboard>打开微软 Rewards ↗</a>'+body:item.runId
-      ?'<button class="ghost" data-notification-run="'+item.runId+'">'+body+'</button>'
-      :body)+'</div>';
+    const body='<span class="notice-head"><b>'+esc(item.title)+'</b><time class="sub">'+RUN_TIME.format(new Date(item.createdAt*1000))+'</time></span>'
+      +'<span class="sub">'+esc(item.message)+'</span>';
+    if(item.runId) return '<button class="ghost notice-row" data-notification-run="'+item.runId+'">'+body+'</button>';
+    if(item.category==='reminder') return '<a class="button-link ghost notice-row" href="'+REWARDS_DASHBOARD+'" target="_blank" rel="noopener noreferrer" data-rewards-dashboard>'+body+'</a>';
+    return '<div class="notice-row">'+body+'</div>';
   }).join(''):'<div class="empty">暂无通知</div>';
 }
 
@@ -1097,10 +1197,13 @@ function renderSchedule(sc){
   $('schCatchUp').value = sc.catchUpMode || 'latest';
   $('schCatchLimit').value = String(sc.catchUpMinutes ?? 720);
   $('schCatchLimit').disabled = $('schCatchUp').value === 'skip';
-  $('schResume').hidden = !sc.paused;
+  $('schResume').hidden=!sc.paused && !(sc.mode==='daily'&&!sc.daemonAlive);
+  $('schResume').textContent=sc.paused?'立即恢复':'恢复定时';
+  $('schTomorrow').hidden=!['daily','boot'].includes(sc.mode);
+  $('schChoose').hidden=$('schTomorrow').hidden;
   const supportsBoot=sc.supportsBoot!==false;
   $('schBootMode').style.display=supportsBoot?'':'none';
-  $('schHint').textContent = sc.participation==='pending'?'在总览选择参与模式后，定时计划会按所选模式生效。':sc.paused ? (supportsBoot?'定时已暂停，可以从这里或托盘菜单恢复。':'定时已暂停，可以从这里恢复。') : !automatic
+  $('schHint').textContent = sc.participation==='pending'?'选择参与模式后，定时计划会按所选模式生效。':sc.paused ? (supportsBoot?'定时已暂停，可以从这里或托盘菜单恢复。':'定时已暂停，可以从这里恢复。') : !automatic
     ? {manual:'未安排定时提醒。',daily:supportsBoot?'到点发送 Windows 提醒，关闭面板后仍生效。':'服务运行时，到点记录到通知中心。',boot:'开机登录后发送 Windows 提醒。'}[SCH_MODE]
     : SCH_MODE==='manual'
     ? '只在你点「开始任务」时执行'
@@ -1196,13 +1299,20 @@ function dialog(opt){
 
 function nav(page){
   PAGE=page;
-  document.querySelectorAll('.navitem').forEach(n=>n.classList.toggle('on', n.dataset.nav===page));
+  document.querySelectorAll('.navitem').forEach(n=>{
+    const active=n.dataset.nav===page;
+    n.classList.toggle('on',active);
+    if(active) n.setAttribute('aria-current','page');
+    else n.removeAttribute('aria-current');
+  });
   document.querySelectorAll('section[data-page]').forEach(s=>s.classList.toggle('on', s.dataset.page===page));
-  $('pageTitle').textContent = {home:'总览',accounts:'账号',detail:'明细',
-    logs:'日志',settings:'设置',about:'关于'}[page];
+  $('pageTitle').textContent = {home:'总览',accounts:'账号',participation:'参与模式',settings:'任务设置',
+    schedule:'定时计划',history:'运行记录',logs:'日志',about:'关于'}[page];
+  document.querySelector('.content').scrollTop=0;
   if(page==='settings') loadConfig();
+  if(page==='participation'&&STATUS?.app?.platform==='windows') loadBrowserPreferences();
   if(page==='logs') loadLogs();
-  if(page==='detail') loadDetail();
+  if(page==='history'){ loadRunHistory(); if($('pointsDetail').open) loadDetail(); }
   if(page==='about'){
     loadSelf();
     if(updateTransfer.state==='idle') refreshUpdateTransfer();
@@ -1301,7 +1411,7 @@ function renderRecentRun(run){
   const version=run ? run.id+':'+run.status+':'+STATUS?.schedule?.participation+':'+JSON.stringify(STATUS?.progress?.accounts||[]) : 'empty';
   if(historyVersion!==version){
     historyVersion=version;
-    if($('runHistoryDialog').open) loadRunHistory();
+    if(PAGE==='history') loadRunHistory();
   }
 }
 
@@ -1319,7 +1429,7 @@ async function loadRunHistory(){
     const response=await fetch('/api/runs',{cache:'no-store'});
     if(!response.ok) throw new Error('运行记录读取失败');
     const {runs}=await response.json();
-    if(request!==historyRequest || !$('runHistoryDialog').open) return;
+    if(request!==historyRequest || PAGE!=='history') return;
     const target=historyTarget;
     historyTarget=null;
     const previous=[...list.querySelectorAll('details')];
@@ -1338,12 +1448,12 @@ async function loadRunHistory(){
           +(account.phase&&button?' ':'')+button+'</td></tr>';
       }).join('');
       const note=run.reason ? '<p class="sub">'+esc(run.reason)+'</p>' : '';
-      const accounts=['reminded','assisted'].includes(run.status)?'<p class="sub">'+(run.status==='assisted'?'请在浏览器中手动完成任务，完成后回到面板查看记录。':'可在微软 Rewards 自行完成活动。')+'</p><a class="button-link ghost sm" href="'+REWARDS_DASHBOARD+'" target="_blank" rel="noopener noreferrer" data-rewards-dashboard>打开微软 Rewards ↗</a>':results ? '<table><thead><tr><th>账号</th><th>任务结果</th><th>积分变化</th><th>操作</th></tr></thead><tbody>'
-        +results+'</tbody></table>' : '<p class="sub">'+(run.status==='running'?'运行结束后显示账号结果':'暂无账号结果')+'</p>';
+      const manualEntry=['reminded','assisted'].includes(run.status);
+      const accounts=manualEntry ? '' : results ? '<div class="history-results"><table><thead><tr><th>账号</th><th>任务结果</th><th>积分变化</th><th>操作</th></tr></thead><tbody>'
+        +results+'</tbody></table></div>' : '<p class="sub">'+(run.status==='running'?'运行结束后显示账号结果':'暂无账号结果')+'</p>';
       const reviewPoints=['unchanged','unavailable'].includes(run.pointsOutcome)
         || run.accounts.some(account=>account.status==='success' && (account.points==null || account.points===0));
-      const pointsHelp=reviewPoints ? '<div class="run-points-help"><span class="sub">如需确认计分情况，请核对微软 Rewards 中对应账号的积分。</span>'
-        +'<a class="button-link ghost sm" href="https://rewards.bing.com/dashboard" target="_blank" rel="noopener noreferrer" data-rewards-dashboard>打开微软 Rewards ↗</a></div>' : '';
+      const pointsHelp=reviewPoints ? '<p class="sub">如需确认计分情况，请到微软 Rewards 核对对应账号的积分。</p>' : '';
       const retryAll=run.status!=='running'&&run.accounts.some(a=>historyAccountAction(a)==='retry')
         ?'<button class="ghost sm" data-run-action="retry-all"'+(historyActionPending?' disabled':'')+'>重试失败账号</button>':'';
       const logButton=run.scheduleKind==='skipped' || ['reminded','assisted'].includes(run.status) || (run.status==='skipped'&&run.reason) ? '' : '<div class="run-entry-actions">'
@@ -1362,9 +1472,9 @@ async function loadRunHistory(){
       }
     }
   }catch(e){
-    if(request===historyRequest){
+    if(request===historyRequest && PAGE==='history'){
       historyTarget=null;
-      list.innerHTML='<div class="empty">无法读取运行记录，请关闭后重试。</div>';
+      list.innerHTML='<div class="empty">无法读取运行记录，请重新打开此页。</div>';
     }
   }
 }
@@ -1399,11 +1509,10 @@ function historyFeedback(message){
   const feedback=$('runHistoryFeedback');
   feedback.hidden=!message;
   feedback.textContent=message;
-  if(!$('runHistoryDialog').open && message) toast(message);
+  if(PAGE!=='history' && message) toast(message);
 }
 
 $('runHistoryList').onclick=async event=>{
-  if(event.target.closest('[data-rewards-dashboard]')) return openRewardsPage(event,'dashboard');
   const button=event.target.closest('button[data-run-action]');
   if(!button) return;
   const entry=button.closest('.run-entry');
@@ -1437,16 +1546,13 @@ $('runHistoryList').onclick=async event=>{
 };
 
 function openRunHistory(runId=null){
-  const dialog=$('runHistoryDialog');
   historyTarget=runId;
   if(!historyActionPending) historyFeedback('');
-  if(!dialog.open){
-    $('runHistoryList').innerHTML='<div class="empty">正在读取运行记录…</div>';
-    dialog.showModal();
-  }
-  loadRunHistory();
+  if(PAGE==='history') loadRunHistory();
+  else nav('history');
 }
 
+$('pointsDetail').ontoggle=()=>{ if($('pointsDetail').open) loadDetail(); };
 $('recentRunButton').onclick=()=>openRunHistory();
 
 function renderHome(d){
@@ -1488,10 +1594,6 @@ function renderHome(d){
     ? [['移动端',log.quota.mobile],['浏览器',log.quota.browser],['App',log.quota.app]]
         .map(r=>'<div class="qrow"><span>'+r[0]+'</span><b>'+r[1]+'</b></div>').join('')
     : '<div class="empty">尚未获取</div>';
-
-  const acts=(log.actions||[]).slice(-6).reverse();
-  $('recentRows').innerHTML=acts.map(a=>'<tr><td class="t">'+a.time+'</td><td>'+esc(a.title)+'</td><td class="p">+'+a.points+'</td><td class="b">'+fmt(a.balance)+'</td></tr>').join('');
-  $('recentEmpty').style.display=acts.length?'none':'block';
 
   $('dot').className='dot'+(d.running?' on':'');
   $('stateText').textContent = d.running ? (d.pid?'运行中 '+d.pid:'运行中') : '空闲';
@@ -1722,8 +1824,12 @@ async function post(path, body){
 
 async function loadLogs(){
   try{
-    const d = await (await fetch('/api/logs?lines=800', {cache:'no-store'})).json();
-    LOGS = d.lines || [];
+    const source=$('logSource').value;
+    const d=await (await fetch('/api/logs?lines=800&source='+source,{cache:'no-store'})).json();
+    if(source!==$('logSource').value) return;
+    LOGS=d.lines||[];
+    $('logAcc').disabled=source!=='task';
+    if(source!=='task') $('logAcc').value='';
     syncLogAccounts();
     renderLogs();
   }catch(e){}
@@ -1743,7 +1849,7 @@ function syncLogAccounts(){
   }
 }
 
-function renderLogs(){
+function filteredLogs(){
   const lvl = $('logLevel').value;
   const q = ($('logSearch').value || '').trim().toLowerCase();
   const ak = $('logAcc') ? $('logAcc').value : '';
@@ -1751,6 +1857,11 @@ function renderLogs(){
   if(lvl) rows = rows.filter(r => r.lvl === lvl);
   if(ak) rows = rows.filter(r => (r.text||'').includes('['+ak+']'));
   if(q) rows = rows.filter(r => r.text.toLowerCase().includes(q));
+  return rows;
+}
+
+function renderLogs(){
+  const rows=filteredLogs();
   const box = $('logBox');
   box.innerHTML = rows.length
     ? rows.map(r=>'<div class="lg '+r.lvl+'">'+esc(r.text)+'</div>').join('')
@@ -1761,14 +1872,11 @@ function renderLogs(){
 
 function exportLogs(){
   if(!LOGS.length) return toast('没有日志');
-  const lvl = $('logLevel').value, q = ($('logSearch').value||'').trim().toLowerCase();
-  let rows = LOGS;
-  if(lvl) rows = rows.filter(r => r.lvl === lvl);
-  if(q) rows = rows.filter(r => r.text.toLowerCase().includes(q));
+  const rows=filteredLogs();
   const blob = new Blob(['\ufeff' + rows.map(r=>r.text).join('\r\n')], {type:'text/plain;charset=utf-8'});
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = 'rewards-log-' + new Date().toISOString().slice(0,10) + '.txt';
+  a.download = 'rewards-'+$('logSource').value+'-' + new Date().toISOString().slice(0,10) + '.txt';
   a.click();
   setTimeout(()=>URL.revokeObjectURL(a.href), 2000);
   toast('已导出 ' + rows.length + ' 行');
@@ -2089,12 +2197,22 @@ $('btnClean').onclick=async()=>{
 };
 
 document.addEventListener('keydown', e=>{
-  if(e.ctrlKey && e.key==='Enter' && !$('participationDialog').open){
+  if(e.ctrlKey && e.key==='Enter' && !document.querySelector('dialog[open],.mask.on')){
     e.preventDefault();
     if(STATUS && STATUS.running) $('btnStop').click(); else $('btnRun').click();
   }
 });
 $('logReload').onclick=()=>loadLogs();
+$('licenseDetails').ontoggle=async()=>{
+  const text=$('licenseText');
+  if(!$('licenseDetails').open||text.dataset.loaded) return;
+  try{
+    const response=await fetch('/api/about/licenses');
+    if(!response.ok) throw new Error();
+    text.textContent=await response.text()||'当前安装包未附带许可证文件。';
+    text.dataset.loaded='1';
+  }catch(error){ text.textContent='无法读取许可证，请重试。'; }
+};
 
 async function noticeAction(action, payload={}){
   const feedback=$('noticeFeedback');
@@ -2167,7 +2285,7 @@ const desktopMode=new URLSearchParams(location.search).get('desktop')==='1';
 const statusUrl=desktopMode ? '/api/status?desktop=1' : '/api/status';
 if(!desktopMode){
   document.querySelector('.winbar').style.display='none';
-  $('trayPreference').style.display='none';
+  $('windowPreferences').hidden=true;
   const currentUrl=new URL(location.href);
   if(currentUrl.searchParams.has('k')){
     currentUrl.searchParams.delete('k');
@@ -2176,16 +2294,19 @@ if(!desktopMode){
 }
 
 async function openRewardsPage(event,page){
-  if(!desktopMode){
-    if(!event.target.closest('a')) window.open(REWARDS_DASHBOARD,'_blank','noopener,noreferrer');
-    return;
+  if(!desktopMode && STATUS?.app?.platform!=='windows'){
+    if(!event.target.closest('a')) window.open(page==='redeem'?'https://rewards.bing.com/redeem':REWARDS_DASHBOARD,'_blank','noopener,noreferrer');
+    return true;
   }
   event.preventDefault();
   try{
     const result=await post('/api/rewards/'+page,{});
-    if(result.ok) return;
-  }catch(error){}
-  toast('无法打开微软 Rewards 页面，请稍后重试。');
+    if(result.ok) return true;
+    toast(result.msg||'无法打开微软 Rewards 页面，请稍后重试。');
+  }catch(error){
+    toast('无法打开微软 Rewards 页面，请稍后重试。');
+  }
+  return false;
 }
 
 $('redeemRewards').onclick=event=>openRewardsPage(event,'redeem');
@@ -2193,19 +2314,21 @@ $('redeemRewards').onclick=event=>openRewardsPage(event,'redeem');
 async function tick(){
   try{
     const d=await (await fetch(statusUrl,{cache:'no-store'})).json();
+    const browserChanged=STATUS?.app?.browser!==d.app?.browser;
     if(Number.isSafeInteger(d.windowRun) && d.windowRun>0){
       $('runLogDialog').close();
       openRunHistory(d.windowRun);
     }
     STATUS=d;
     renderParticipation(d.schedule,d.runningBy==='process'||d.runningBy==='task');
+    if(browserChanged&&PAGE==='participation'&&d.app?.platform==='windows') loadBrowserPreferences();
     setNoticeCount(d.noticeCount||0);
     renderRunProgress(d.progress);
     notifyRunFinished(d.latestRun);
     renderHome(d); renderAccounts(d.accounts,d.running); renderDetail(d); renderEnv(d);
     if(!SCH_DIRTY) renderSchedule(d.schedule);
     if(PAGE==='logs') loadLogs();
-    if(PAGE==='detail' && Date.now()-LAST_DETAIL > 8000) loadDetail();
+    if(PAGE==='history' && $('pointsDetail').open && Date.now()-LAST_DETAIL > 8000) loadDetail();
     return true;
   }catch(e){ $('stateText').textContent='错误: '+(e&&e.message?e.message.slice(0,40):'未知'); $('dot').className='dot'; }
   return false;
@@ -2236,10 +2359,12 @@ document.querySelectorAll('.navitem').forEach(n=>n.onclick=()=>nav(n.dataset.nav
 $('btnRun').onclick=async event=>{
   const mode=STATUS?.schedule?.participation;
   if(mode==='browser'){
-    const result=await post('/api/run',{});
-    if(!result.ok) return toast(result.msg||'无法记录辅助运行');
-    openRewardsPage(event,'dashboard');
-    toast('已打开微软 Rewards，完成后回到面板查看记录');
+    if(!await openRewardsPage(event,'dashboard')) return;
+    try{
+      const result=await post('/api/run',{});
+      if(!result.ok) return toast(result.msg||'无法写入辅助记录');
+      await tick();
+    }catch(error){ toast('无法写入辅助记录，请重试。'); }
     return;
   }
   if(mode!=='automatic') return openRewardsPage(event,'dashboard');
@@ -2354,7 +2479,7 @@ $('cfgSave').onclick=async()=>{
   CONFIG.items=Object.assign({},DRAFT);
   toast('已保存 '+n+' 项');
 };
-$('btnInstall').onclick=async()=>{
+$('btnInstall').onclick=$('downloadBackupBrowser').onclick=async()=>{
   const yes=await dialog({title:'下载内置内核',
     desc:'会重新下载 patchright 的 Chromium 到 browser 目录，约 184MB。已存在则覆盖。',
     input:false, ok:'开始下载'});
@@ -2371,37 +2496,160 @@ $('segMode').onclick=e=>{
   $('timeRow').style.display = SCH_MODE==='daily' ? 'block' : 'none';
 };
 
-$('homeParticipation').onclick=()=>{
+function openParticipationDialog(){
+  modeOnboarding=true;
+  $('participationTitle').textContent='选择参与模式';
+  $('participationHint').hidden=false;
+  $('participationHint').textContent='选择后，可在侧边栏「参与模式」切换。';
   $('participationError').hidden=true;
   $('participationDialog').showModal();
+}
+
+let browserSetup=null;
+let browserSetupBusy=false;
+const BROWSER_LABELS={default:'系统默认浏览器',msedge:'Microsoft Edge',chrome:'Google Chrome',chromium:'内置 Chromium'};
+
+function browserFeedback(id,message){
+  const feedback=$(id);
+  feedback.textContent=message;
+  feedback.hidden=!message;
+}
+
+function renderBrowserPreferences(){
+  const selected=browserSetup?.browser||'default';
+  const available=browserSetup?.available;
+  const select=$('browserPreference');
+  for(const option of select.options) option.disabled=!available?.[option.value];
+  select.value=selected;
+  select.disabled=browserSetupBusy||!browserSetup;
+  $('downloadBackupBrowser').hidden=!available||available.chromium;
+
+  const actual=selected==='default'?browserSetup?.defaultChannel:selected;
+  const canInstall=available?.[actual]&&(actual==='msedge'||actual==='chrome');
+  $('openTampermonkeyInstall').disabled=browserSetupBusy||!canInstall;
+  $('copyRewardsScript').disabled=browserSetupBusy||!canInstall||!browserSetup?.scriptUrl;
+  $('scriptGuideChangeBrowser').hidden=!browserSetup||canInstall;
+  $('scriptGuideBrowserNote').textContent=!browserSetup?'正在读取浏览器设置…':canInstall
+    ? '当前使用 '+BROWSER_LABELS[actual]+'。安装和使用时，请保持在同一个浏览器个人资料里。'
+    : '安装 Tampermonkey 需要 Edge 或 Chrome。请在「参与模式」中选择其中一个浏览器。';
+}
+
+async function loadBrowserPreferences(){
+  try{
+    const response=await fetch('/api/browser/preferences',{cache:'no-store'});
+    const setup=await response.json();
+    if(!setup.ok) throw new Error(setup.msg||'无法读取浏览器设置');
+    browserSetup=setup;
+    browserFeedback('browserPreferenceFeedback',setup.available[setup.browser]?'':'所选浏览器不可用，请重新选择。');
+    if(!setup.scriptUrl) browserFeedback('scriptGuideFeedback','当前安装缺少 Rewards 助手脚本，请检查软件文件。');
+  }catch(error){
+    browserFeedback('browserPreferenceFeedback','无法读取浏览器设置，请重新打开「参与模式」。');
+    browserFeedback('scriptGuideFeedback','无法读取浏览器设置，请重新打开教程。');
+  }
+  renderBrowserPreferences();
+}
+
+function openScriptGuide(){
+  const dialog=$('scriptGuideDialog');
+  if(dialog.open) return;
+  browserFeedback('scriptGuideFeedback','');
+  $('scriptInstallUrl').hidden=true;
+  renderBrowserPreferences();
+  dialog.showModal();
+  loadBrowserPreferences();
+}
+
+$('homeParticipation').onclick=()=>nav('participation');
+$('participationScriptGuide').onclick=openScriptGuide;
+$('participationDialog').addEventListener('cancel',event=>{
+  if(modeOnboarding) event.preventDefault();
+});
+$('scriptGuideChangeBrowser').onclick=()=>{
+  $('scriptGuideDialog').close();
+  nav('participation');
+  $('browserPreference').focus();
+};
+$('browserPreference').onchange=async event=>{
+  const browser=event.target.value;
+  browserSetupBusy=true;
+  event.target.disabled=true;
+  browserFeedback('browserPreferenceFeedback','');
+  try{
+    const result=await post('/api/browser/preferences',{browser});
+    if(!result.ok) throw new Error(result.msg||'无法保存浏览器选择');
+    browserSetup.browser=browser;
+    browserFeedback('browserPreferenceFeedback','已保存浏览器选择。');
+  }catch(error){
+    browserFeedback('browserPreferenceFeedback',error.message||'无法保存浏览器选择，请重试。');
+  }finally{
+    browserSetupBusy=false;
+    renderBrowserPreferences();
+  }
+};
+$('openTampermonkeyInstall').onclick=async()=>{
+  const button=$('openTampermonkeyInstall');
+  button.disabled=true;
+  browserFeedback('scriptGuideFeedback','');
+  try{
+    const result=await post('/api/tampermonkey/open');
+    browserFeedback('scriptGuideFeedback',result.ok?'已打开官方商店，请在浏览器中确认添加扩展。':result.msg||'无法打开官方商店');
+  }catch(error){
+    browserFeedback('scriptGuideFeedback','无法打开官方商店，请重试。');
+  }finally{
+    renderBrowserPreferences();
+  }
+};
+$('copyRewardsScript').onclick=async()=>{
+  const input=$('scriptInstallUrl');
+  const url=browserSetup.scriptUrl;
+  try{
+    await navigator.clipboard.writeText(url);
+    input.hidden=true;
+    browserFeedback('scriptGuideFeedback','已复制。请粘贴到 Tampermonkey 的「从 URL 安装」。');
+  }catch(error){
+    input.value=url;
+    input.hidden=false;
+    input.focus();
+    input.select();
+    browserFeedback('scriptGuideFeedback','请按 Ctrl+C 复制选中的链接，再粘贴到 Tampermonkey。');
+  }
 };
 
-$('participationMode').onclick=async event=>{
-  const mode=event.target.closest('button')?.dataset.participation;
-  if(!mode || participationSwitchPending || STATUS?.schedule?.participation===mode) return;
-  const errorText=$('participationError');
-  errorText.hidden=true;
+async function chooseParticipation(event){
+  const mode=event.target.closest('button[data-participation]')?.dataset.participation;
+  if(!mode || participationSwitchPending) return;
+  const dialog=$('participationDialog');
+  const feedback=dialog.open?$('participationError'):$('participationPageFeedback');
+  feedback.hidden=true;
   const running=()=>['process','task'].includes(STATUS?.runningBy);
+  const changed=STATUS?.schedule?.participation!==mode;
+  if(!changed && !modeOnboarding) return;
   participationSwitchPending=true;
   renderParticipation(STATUS?.schedule,running());
   try{
-    if(mode==='automatic' && !await confirmRisk()) return;
-    const result=await post('/api/participation',{mode});
-    if(!result.ok) throw new Error(result.msg||'无法保存参与模式');
-    if(STATUS?.schedule) STATUS.schedule.participation=result.participation||mode;
+    if(changed && mode==='automatic' && !await confirmRisk()) return;
+    if(changed){
+      const result=await post('/api/participation',{mode});
+      if(!result.ok) throw new Error(result.msg||'无法保存参与模式');
+      if(STATUS?.schedule) STATUS.schedule.participation=result.participation||mode;
+    }
+    try{ localStorage.setItem('rewardsModeSelected','1'); }catch(error){}
     await tick();
     renderTimeRows();
-    $('participationDialog').close();
-    toast(mode==='automatic'?'已启用自动任务':mode==='browser'?'已切换到浏览器辅助':'已切换到仅查看与提醒');
+    modeOnboarding=false;
+    if(dialog.open) dialog.close();
+    toast('已选择'+MODE_OPTIONS[mode].label);
+    if(mode==='browser' && STATUS?.app?.platform==='windows') openScriptGuide();
   }catch(error){
-    errorText.textContent=error.message||'无法保存参与模式';
-    errorText.hidden=false;
+    feedback.textContent=error.message||'无法保存参与模式';
+    feedback.hidden=false;
   }finally{
     participationSwitchPending=false;
     renderParticipation(STATUS?.schedule,running());
-    if(!$('participationDialog').open) $('homeParticipation').focus();
   }
-};
+}
+
+$('participationMode').onclick=$('participationPageOptions').onclick=chooseParticipation;
 
 $('schSave').onclick=async()=>{
   const mode=SCH_MODE;
@@ -2531,7 +2779,6 @@ document.getElementById('setTabs').onclick=e=>{
   const t=e.target.closest('.tab'); if(!t) return;
   document.querySelectorAll('#setTabs .tab').forEach(x=>x.classList.toggle('on',x===t));
   document.querySelectorAll('.pane').forEach(p=>p.classList.toggle('on',p.dataset.pane===t.dataset.tab));
-  $('taskConfigActions').hidden=t.dataset.tab==='t3';
 };
 
 function closeAccountBulk(restoreFocus=false){
@@ -2577,6 +2824,7 @@ $('dSearch').oninput = () => renderDetail(STATUS);
 $('dOnlyGain').onchange = () => renderDetail(STATUS);
 $('dExport').onclick = exportCsv;
 
+$('logSource').onchange=()=>{ LOGS=[]; renderLogs(); loadLogs(); };
 $('logLevel').onchange = () => renderLogs();
 $('logSearch').oninput = () => renderLogs();
 $('logExport').onclick = exportLogs;
@@ -2623,7 +2871,7 @@ $('schSkip').onclick = async () => {
 async function setSchedulePause(paused, until, feedback=toast){
   if(SCHEDULE_PAUSE_BUSY) return false;
   SCHEDULE_PAUSE_BUSY=true;
-  const buttons=['homeScheduleResume','homeScheduleTomorrow','homeScheduleChoose','schResume','schedulePauseSave'].map($);
+  const buttons=['homeScheduleResume','homeScheduleTomorrow','homeScheduleChoose','schResume','schTomorrow','schChoose','schedulePauseSave'].map($);
   for(const button of buttons) button.disabled=true;
   try{
     const schedule=await post('/api/schedule/pause',{paused,until});
@@ -2672,8 +2920,8 @@ async function openSchedulePause(){
 }
 
 $('homeScheduleResume').onclick=$('schResume').onclick=()=>setSchedulePause(false);
-$('homeScheduleTomorrow').onclick=()=>setSchedulePause(true,'tomorrow');
-$('homeScheduleChoose').onclick=openSchedulePause;
+$('homeScheduleTomorrow').onclick=$('schTomorrow').onclick=()=>setSchedulePause(true,'tomorrow');
+$('homeScheduleChoose').onclick=$('schChoose').onclick=openSchedulePause;
 $('schedulePauseForm').onsubmit=async event=>{
   event.preventDefault();
   const error=$('schedulePauseError');
@@ -2692,8 +2940,13 @@ $('schedulePauseForm').onsubmit=async event=>{
   }catch(e){}
   $('onlyActive').checked = !!PREFS.onlyActive;
   $('keepInTray').checked = !!PREFS.keepInTray;
-  nav('home'); tick(); setInterval(tick, 2500);
-  if(location.hash==='#schedule-pause'){
+  nav('home');
+  await tick();
+  let modeSelected=false;
+  try{ modeSelected=localStorage.getItem('rewardsModeSelected')==='1'; }catch(error){}
+  if(!modeSelected && ['pending','reminder'].includes(STATUS?.schedule?.participation)) openParticipationDialog();
+  setInterval(tick, 2500);
+  if(!modeOnboarding && location.hash==='#schedule-pause'){
     history.replaceState(null,'',location.pathname+location.search);
     openSchedulePause();
   }

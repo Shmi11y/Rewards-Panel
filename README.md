@@ -4,27 +4,40 @@ Rewards 面板是基于开源项目 Microsoft-Rewards-Script 的可视化面板�
 
 ## 下载 Windows x64 轻量便携版
 
-**[下载 Rewards Panel v0.1.18 轻量便携包（约 76 MiB）](https://github.com/Shmi11y/Rewards-Panel/releases/download/v0.1.18/RewardsPanel-windows-x64-lite.zip)**
+**[下载 Rewards Panel v0.1.19 轻量便携包（约 76 MiB）](https://github.com/Shmi11y/Rewards-Panel/releases/download/v0.1.19/RewardsPanel-windows-x64-lite.zip)**
 
 1. 将 ZIP 完整解压到本机可写入的目录，打开 `RewardsPanel` 文件夹。
 2. 双击带项目图标的 **`Rewards.exe`**。
-3. **首次启动请保持联网。** 程序会自动配置运行环境并下载 Chromium。已有 WebView2 会直接复用，缺少时会自动下载到软件目录。窗口会显示正在下载的组件和百分比。
+3. **首次启动请保持联网。** 已有 WebView2 会直接复用，缺少时会自动下载到软件目录。使用 WebView2 正常启动时，备用 Chromium 可在「参与模式」按需下载。
 
 下载失败时，点击「重试」重新尝试，或点击「打开日志」查看解压目录中的 `logs/launcher.log`。
 
 Python 和 Node.js 已随包提供。面板打开后，在「账号 → 添加账号」完成首次登录。也可以直接从总览打开微软 Rewards，自行完成活动。
 
-## 浏览器辅助模式
+## 油猴脚本模式（Windows）
 
-参与模式选择「浏览器辅助」后，首页按钮会打开微软 Rewards。任务由用户在浏览器中手动点击，面板负责余额同步、账号状态、任务提醒、通知和运行记录。该模式不会启动自动任务引擎。
+在应用侧边栏打开「参与模式」。手动、全自动和油猴脚本模式共用这一处浏览器设置。打开 Rewards 默认跟随 Windows，也可指定 Edge、Chrome 或备用 Chromium。全自动模式使用受支持的浏览器内核和独立的登录会话。升级后继续使用原来保存的浏览器选择，可随时切回「系统默认浏览器」。
+
+选择「油猴脚本模式」后打开安装教程。教程支持 Edge 和 Chrome。若系统默认浏览器是其他浏览器，请先在「参与模式」选择 Edge 或 Chrome。
+
+1. 在教程中点击「打开官方商店」，按浏览器提示添加 Tampermonkey。 [Edge 扩展商店](https://microsoftedge.microsoft.com/addons/detail/tampermonkey/iikmkjmpaadaobahmlepeloendndfphd) · [Chrome 应用商店](https://chromewebstore.google.com/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo)
+2. 在 Tampermonkey 的扩展详情中开启「允许运行用户脚本」。 [Tampermonkey 官方说明](https://www.tampermonkey.net/faq.php?q=Q209)
+3. 保持 Rewards 面板运行，点击「复制脚本链接」。在 Tampermonkey 的「管理面板 → 实用工具 → 从 URL 安装」粘贴链接并确认。
+4. 回到总览，点击「打开 Rewards」。在安装脚本的浏览器个人资料里登录微软账号，然后使用页面上的「Rewards 助手」。
+
+![油猴脚本安装教程，包含 Chrome 官方商店入口、脚本授权步骤和复制脚本链接](docs/script-install-guide.png)
+
+这个模式由浏览器运行脚本，面板继续提供余额、状态、提醒和运行记录。若希望在网页手动完成活动，可选择「手动模式」。
 
 ## Linux 与 Docker
 
 Linux 和 Docker 版提供总览、账号管理、余额同步、手动任务、每日定时、补跑与暂停、运行记录、面板内通知和设置备份。每日定时在面板服务运行时生效。Windows 托盘、系统通知、开机启动项和 EXE 一键更新属于桌面版功能。
 
+Linux 和 Docker 的预构建下载包为 v0.1.17。
+
 ### Linux
 
-1. 下载并解压 [启动与安装包](https://github.com/Shmi11y/Rewards-Panel/releases/download/v0.1.18/RewardsPanel-linux-x64.tar.gz)。需要 Git、Python 3.10+、Node.js 24+ 和 npm，推荐在 Ubuntu 24.04 x64 上运行。
+1. 下载并解压 [启动与安装包](https://github.com/Shmi11y/Rewards-Panel/releases/download/v0.1.17/RewardsPanel-linux-x64.tar.gz)。需要 Git、Python 3.10+、Node.js 24+ 和 npm，推荐在 Ubuntu 24.04 x64 上运行。
 2. 在解压目录运行 `bash install-linux.sh --with-deps`，首次会联网下载并构建任务引擎、安装 Chromium 和系统库。安装系统库时可能请求 sudo。
 3. 运行 `bash launch-linux.sh`。另开终端，在相同目录执行 `cat data/.api-token`，将令牌填到 `http://127.0.0.1:8765/?k=你的令牌` 末尾后，用浏览器打开。
 4. 在「账号 → 添加账号」完成首次登录。登录窗口在运行面板的 Linux 桌面上弹出，需要可用的 X11 或 XWayland 会话。已有会话后的任务可以无头运行。
@@ -35,7 +48,7 @@ Linux 和 Docker 版提供总览、账号管理、余额同步、手动任务、
 
 Docker 版面板和 Chromium 都在容器内，账号、会话、设置、定时计划和日志保存在命名卷 `rewards-data`。默认同时提供 x64 镜像和源码构建方式。
 
-1. 下载并解压上面的启动与安装包，从其中含 `compose.yaml` 的目录运行 `docker compose up -d --build`。也可下载 [Docker x64 镜像包](https://github.com/Shmi11y/Rewards-Panel/releases/download/v0.1.18/RewardsPanel-docker-amd64.tar.gz)，再执行下列命令跳过构建。
+1. 下载并解压上面的启动与安装包，从其中含 `compose.yaml` 的目录运行 `docker compose up -d --build`。也可下载 [Docker x64 镜像包](https://github.com/Shmi11y/Rewards-Panel/releases/download/v0.1.17/RewardsPanel-docker-amd64.tar.gz)，再执行下列命令跳过构建。
 
    ```sh
    docker load -i RewardsPanel-docker-amd64.tar.gz
@@ -156,7 +169,7 @@ Docker 版面板和 Chromium 都在容器内，账号、会话、设置、定时
 
 ![节奏与运行设置页，窗口区域已勾选关闭窗口后留在托盘](docs/settings-runtime.png)
 
-在「节奏与运行」可调整搜索节奏、无头模式、浏览器和并发数。添加账号和重新登录时仍会打开浏览器窗口。首次点击窗口右上角的 X，可以选择「最小化到托盘」或「退出程序」，默认选项为最小化到托盘。选择会被记住，也可在「节奏与运行 → 窗口」修改。留在托盘时当前任务继续运行，可右键选择「打开面板」或「退出程序」。
+在「节奏与运行」可调整搜索节奏、无头模式和并发数。Windows 浏览器选项位于「参与模式」。添加账号和重新登录时会打开浏览器窗口。首次点击窗口右上角的 X，可以选择「最小化到托盘」或「退出程序」，默认选项为最小化到托盘。选择会被记住，也可在「节奏与运行 → 窗口」修改。留在托盘时当前任务继续运行，可右键选择「打开面板」或「退出程序」。
 
 ![Windows 托盘右键菜单显示暂停截止时间、暂停到明天、暂停到指定时间和立即恢复](docs/tray-menu.jpg)
 
@@ -297,7 +310,7 @@ RewardsApp/
 ├─ assets/               图标（png/ico）与生成脚本
 ├─ docs/                 README 截图
 ├─ app/                  ← 上游项目，自行放置，不入库
-├─ browser/              ← Patchright Chromium，便携版首次启动自动下载，不入库
+├─ browser/              ← Patchright Chromium，Windows 桌面版按需下载，不入库
 └─ data/                 ← 运行时数据，不入库
    ├─ .env               账号配置（工具读取）
    ├─ accounts.json      账号表（密码字段为 DPAPI 密文）

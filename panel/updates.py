@@ -25,7 +25,7 @@ ARCHIVE = "RewardsPanel-windows-x64-lite.zip"
 MAX_BYTES = 512 * 1024 * 1024
 MAX_METADATA = 1024 * 1024
 REQUEST_HEADERS = {"User-Agent": "RewardsPanel"}
-USER_FOLDERS = {"data", "browser", "logs", "ui-profile", "updates", ".git"}
+USER_FOLDERS = {"data", "browser", "logs", "ui-profile", "browser-profile", "updates", ".git"}
 
 
 def _program_path(root: Path, member: str) -> Path | None:

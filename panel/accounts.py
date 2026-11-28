@@ -568,6 +568,7 @@ def start_login(email: str, *, existing_only: bool = False) -> dict:
         env["REWARDS_APP_ROOT"] = str(ROOT)
         env["REWARDS_DATA_DIR"] = str(DATA_DIR)
         env["PLAYWRIGHT_BROWSERS_PATH"] = str(BROWSER_ROOT)
+        env["REWARDS_LOGIN_BROWSER"] = run_history.engine_browser_channel(DATA_DIR)
         try:
             with TemporaryDirectory(prefix="login-profile.", dir=DATA_DIR, ignore_cleanup_errors=True) as profile:
                 capture_login(env, profile)

@@ -65,3 +65,7 @@
 ## 五、GitHub 图标
 
 「关于」页使用 GitHub Octicons 的 `mark-github-16` 图标。MIT 许可见 [docs/octicons-MIT-LICENSE.txt](docs/octicons-MIT-LICENSE.txt)。
+
+## 六、Rewards 助手用户脚本
+
+`browser-assistant/Rewards-Panel-userscript.user.js` 按 GNU GPL v3 提供，许可全文见 [browser-assistant/LICENSE.txt](browser-assistant/LICENSE.txt)。脚本源码随 Windows 便携包提供。Tampermonkey 通过浏览器的官方扩展商店安装。

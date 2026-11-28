@@ -1,5 +1,5 @@
 /**
- * login.js — 在应用内置内核里登录一个账号，并把会话写进 sessions.db
+ * login.js — 在独立浏览器配置里登录一个账号，并把会话写进 sessions.db
  *
  * 用法：
  *   node.exe login.js --email a@b.com [--profile <dir>] [--timeout 900]
@@ -57,13 +57,24 @@ function saveSession(email, storageState) {
   fs.mkdirSync(PROFILE, { recursive: true });
   console.log(JSON.stringify({ ok: true, stage: 'launching', email: EMAIL }));
 
-  const ctx = await chromium.launchPersistentContext(PROFILE, {
+  const channel = process.env.REWARDS_LOGIN_BROWSER;
+  const options = {
     headless: false,
     viewport: { width: 1280, height: 860 },
     locale: 'zh-CN',
     timezoneId: 'Asia/Shanghai',
     args: ['--disable-blink-features=AutomationControlled', '--no-first-run', '--no-default-browser-check'],
-  });
+  };
+  let ctx;
+  if (process.platform === 'win32' && (channel === 'chrome' || channel === 'msedge')) {
+    try {
+      ctx = await chromium.launchPersistentContext(PROFILE, { ...options, channel });
+    } catch {
+      ctx = await chromium.launchPersistentContext(PROFILE, options);
+    }
+  } else {
+    ctx = await chromium.launchPersistentContext(PROFILE, options);
+  }
   const page = ctx.pages()[0] || (await ctx.newPage());
 
   try {

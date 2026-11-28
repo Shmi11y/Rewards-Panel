@@ -170,13 +170,12 @@ def launch(root: Path, *, interactive: bool = False, use_chromium: bool = False)
             use_chromium = True
     if use_chromium:
         env["REWARDS_USE_CHROMIUM_UI"] = "1"
-
-    print("STATUS 正在检查 Chromium，首次启动会自动下载…", flush=True)
-    try:
-        install_chromium(node, browser_cli, env)
-    except (OSError, subprocess.SubprocessError) as error:
-        print(f"Chromium 配置失败 {error}", flush=True)
-        return CHROMIUM_SETUP_FAILED
+        print("STATUS 正在准备桌面备用 Chromium…", flush=True)
+        try:
+            install_chromium(node, browser_cli, env)
+        except (OSError, subprocess.SubprocessError) as error:
+            print(f"Chromium 配置失败 {error}", flush=True)
+            return CHROMIUM_SETUP_FAILED
 
     print("STATUS 正在打开 Rewards 面板…", flush=True)
     log_directory = root / "logs"

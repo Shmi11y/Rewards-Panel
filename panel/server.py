@@ -21,6 +21,7 @@ import subprocess
 import sys
 import threading
 import time
+from collections import deque
 from datetime import datetime
 from http.cookies import CookieError, SimpleCookie
 from urllib.parse import parse_qs, urlsplit
@@ -33,6 +34,12 @@ HOME = ROOT / "app"
 ENTRY = HOME / "dist" / "index.js"
 LOG_DIR = HOME / "logs"
 BROWSER_ROOT = ROOT / "browser"
+USER_SCRIPT = ROOT / "browser-assistant" / "Rewards-Panel-userscript.user.js"
+SCRIPT_INSTALL_PATH = f"/install/{secrets.token_urlsafe(24)}/Rewards-Panel.user.js"
+TAMPERMONKEY_STORES = {
+    "msedge": "https://microsoftedge.microsoft.com/addons/detail/tampermonkey/iikmkjmpaadaobahmlepeloendndfphd",
+    "chrome": "https://chromewebstore.google.com/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo",
+}
 WINDOWS = os.name == "nt"
 CONTAINER = not WINDOWS and os.environ.get("REWARDS_CONTAINER") == "1"
 
@@ -523,13 +530,21 @@ def install_browser() -> dict:
 RE_ANSI = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
 
 
-def read_logs(count: int = 300) -> dict:
-    path = HOME / "logs" / f"{datetime.now():%Y-%m-%d}.log"
+def read_logs(count: int = 300, source: str = "task") -> dict:
+    paths = {
+        "task": LOG_DIR / f"{datetime.now():%Y-%m-%d}.log",
+        "startup": ROOT / "logs" / "launcher.log",
+        "browser": ROOT / "logs" / "browser-install.log",
+        "scheduler": ROOT / "logs" / "scheduler.log",
+    }
+    path = paths.get(source)
+    if path is None:
+        return {"lines": [], "error": "未知日志来源", "count": 0}
     if not path.exists():
         return {"lines": [], "path": str(path), "count": 0}
     try:
         with open(path, "r", encoding="utf-8", errors="ignore") as fh:
-            tail = fh.readlines()[-max(20, min(count, 2000)):]
+            tail = deque(fh, maxlen=max(20, min(count, 2000)))
     except Exception as exc:  # noqa: BLE001
         return {"lines": [], "path": str(path), "error": str(exc), "count": 0}
     out = []
@@ -563,22 +578,59 @@ def _node_version() -> tuple[bool, str]:
 
 def system_browsers() -> dict:
     if not WINDOWS:
-        return {"chrome": shutil.which("google-chrome") or "", "edge": shutil.which("microsoft-edge") or ""}
-    def probe(candidates):
-        for c in candidates:
-            if c and Path(c).exists():
-                return str(c)
-        return ""
+        return {"chrome": shutil.which("google-chrome") or "", "msedge": shutil.which("microsoft-edge") or "", "chromium": ""}
+    candidates = [path for path in BROWSER_ROOT.glob("chromium-*/chrome-win64/chrome.exe") if path.is_file()]
+    chromium = max(candidates, key=lambda path: int(path.parents[1].name.split("-")[-1])
+                   if path.parents[1].name.split("-")[-1].isdigit() else -1, default=None)
+    return {**run_history.windows_browser_paths(), "chromium": str(chromium) if chromium else ""}
 
-    pf = os.environ.get("ProgramFiles", r"C:\Program Files")
-    pf86 = os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")
-    local = os.environ.get("LOCALAPPDATA", "")
-    chrome = probe([str(Path(pf) / "Google/Chrome/Application/chrome.exe"),
-                    str(Path(pf86) / "Google/Chrome/Application/chrome.exe"),
-                    str(Path(local) / "Google/Chrome/Application/chrome.exe")])
-    edge = probe([str(Path(pf86) / "Microsoft/Edge/Application/msedge.exe"),
-                  str(Path(pf) / "Microsoft/Edge/Application/msedge.exe")])
-    return {"chrome": chrome, "edge": edge}
+
+def browser_preferences() -> dict:
+    browsers = system_browsers()
+    channel = run_history.configured_browser_channel(DATA_DIR)
+    return {"ok": True, "browser": channel or "default", "defaultChannel": run_history.windows_default_browser_channel(),
+            "available": {"default": True, **{name: bool(value) for name, value in browsers.items()}},
+            "scriptUrl": f"http://127.0.0.1:{PORT}{SCRIPT_INSTALL_PATH}" if USER_SCRIPT.is_file() else ""}
+
+
+def open_tampermonkey_store() -> dict:
+    if not WINDOWS or run_history.participation(DATA_DIR) != "browser":
+        return {"ok": False, "msg": "请先切换到油猴脚本模式"}
+    browser = run_history.configured_browser_channel(DATA_DIR) or run_history.windows_default_browser_channel()
+    url = TAMPERMONKEY_STORES.get(browser)
+    if not url:
+        return {"ok": False, "msg": "请到「参与模式」选择 Edge 或 Chrome 后再打开官方商店。"}
+    return open_selected_browser(url, browser=browser)
+
+
+def open_selected_browser(url: str, *, browser: str | None = None) -> dict:
+    name = browser if browser is not None else run_history.configured_browser_channel(DATA_DIR)
+    if not name:
+        try:
+            os.startfile(url)
+        except OSError:
+            name = "chromium"
+        else:
+            return {"ok": True}
+    program = system_browsers().get(name)
+    if not program:
+        return {"ok": False, "msg": "找不到所选浏览器，请在「参与模式」中选择已安装的浏览器。"}
+    args = [program]
+    if name == "chromium":
+        args.append(f"--user-data-dir={ROOT / 'browser-profile'}")
+    try:
+        subprocess.Popen([*args, url], cwd=str(ROOT), creationflags=run_history.NO_WINDOW)
+    except OSError:
+        return {"ok": False, "msg": "无法打开所选浏览器，请确认浏览器可正常启动。"}
+    return {"ok": True}
+
+
+def set_browser_preference(value) -> dict:
+    if not WINDOWS or not isinstance(value, str):
+        return {"ok": False, "msg": "浏览器设置无效"}
+    if value != "default" and not system_browsers().get(value):
+        return {"ok": False, "msg": "请选择已安装的浏览器。"}
+    return set_config("browserChannel", "" if value == "default" else value)
 
 
 def selftest() -> dict:
@@ -615,7 +667,7 @@ def selftest() -> dict:
     sysb = system_browsers()
     checks.append({"name": "系统浏览器", "ok": True,
                    "detail": "Chrome " + ("有" if sysb["chrome"] else "无")
-                             + " / Edge " + ("有" if sysb["edge"] else "无")})
+                             + " / Edge " + ("有" if sysb["msedge"] else "无")})
 
     return {"ok": all(c["ok"] for c in checks), "checks": checks,
             "version": _app_version(), "portableVersion": portable_version(), "dataDir": str(DATA_DIR),
@@ -1105,6 +1157,17 @@ class Handler(BaseHTTPRequestHandler):
             pass
 
     def do_GET(self) -> None:  # noqa: N802
+        if self.path == SCRIPT_INSTALL_PATH:
+            if not WINDOWS or self.headers.get("Host") != f"127.0.0.1:{PORT}":
+                self._send(403, b"forbidden", "text/plain; charset=utf-8")
+                return
+            try:
+                content = USER_SCRIPT.read_bytes()
+            except OSError:
+                self._send(404, b"not found", "text/plain; charset=utf-8")
+            else:
+                self._send(200, content, "text/plain; charset=utf-8")
+            return
         if not self._authorized():
             self._send(403, b"forbidden", "text/plain; charset=utf-8")
             return
@@ -1119,6 +1182,19 @@ class Handler(BaseHTTPRequestHandler):
                 pass
 
     def _route_get(self) -> None:
+        if self.path == "/api/browser/preferences":
+            result = browser_preferences() if WINDOWS else {"ok": False, "msg": "浏览器设置适用于 Windows"}
+            self._send(200, json.dumps(result, ensure_ascii=False).encode("utf-8"),
+                       "application/json; charset=utf-8")
+            return
+        if self.path == "/api/about/licenses":
+            documents = []
+            for name in ("LICENSE", "THIRD-PARTY-NOTICES.md"):
+                path = ROOT / name
+                if path.is_file():
+                    documents.append(path.read_text(encoding="utf-8"))
+            self._send(200, "\n\n".join(documents).encode("utf-8"), "text/plain; charset=utf-8")
+            return
         if self.path == "/api/diagnostics":
             report = diagnostics.make_report(ROOT, DATA_DIR, portable_version(), _app_version())
             self._send(200, json.dumps({"report": report}, ensure_ascii=False).encode("utf-8"),
@@ -1183,14 +1259,14 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, json.dumps(sched_mod.status(), ensure_ascii=False).encode("utf-8"),
                        "application/json; charset=utf-8")
             return
-        if self.path.startswith("/api/logs"):
-            n = 300
-            if "lines=" in self.path:
-                try:
-                    n = int(self.path.split("lines=", 1)[1].split("&")[0])
-                except Exception:
-                    n = 300
-            self._send(200, json.dumps(read_logs(n), ensure_ascii=False).encode("utf-8"),
+        if urlsplit(self.path).path == "/api/logs":
+            query = parse_qs(urlsplit(self.path).query)
+            try:
+                n = int(query.get("lines", ["300"])[0])
+            except ValueError:
+                n = 300
+            source = query.get("source", ["task"])[0]
+            self._send(200, json.dumps(read_logs(n, source), ensure_ascii=False).encode("utf-8"),
                        "application/json; charset=utf-8")
             return
         if self.path.startswith("/api/prefs"):
@@ -1278,12 +1354,16 @@ class Handler(BaseHTTPRequestHandler):
                     threading.Timer(0.4, _local_exit).start()
         elif self.path == "/api/update/open-folder":
             result = UPDATE_DOWNLOADS.open_folder() if WINDOWS else {"ok": False, "msg": "请在发布页查看新版"}
+        elif self.path == "/api/browser/preferences":
+            result = set_browser_preference(body.get("browser") if isinstance(body, dict) else None)
+        elif self.path == "/api/tampermonkey/open":
+            result = open_tampermonkey_store()
         elif self.path in {"/api/rewards/dashboard", "/api/rewards/redeem"} and not WINDOWS:
             result = {"ok": False, "msg": "请从页面链接打开微软 Rewards"}
         elif self.path in {"/api/rewards/dashboard", "/api/rewards/redeem"}:
             try:
-                os.startfile("https://rewards.bing.com/redeem" if self.path.endswith("/redeem") else REWARDS_DASHBOARD)
-                result = {"ok": True}
+                target = "https://rewards.bing.com/redeem" if self.path.endswith("/redeem") else REWARDS_DASHBOARD
+                result = open_selected_browser(target)
             except OSError:
                 result = {"ok": False, "msg": "无法打开微软 Rewards 页面，请稍后重试。"}
         elif self.path == "/api/risk/acknowledge":
@@ -1414,11 +1494,12 @@ def seed_config() -> None:
     example = HOME / "config.example.json"
     if CONFIG_FILE.exists() or not example.is_file():
         return
-    defaults = example.read_bytes()
-    if not WINDOWS:
-        config = json.loads(defaults)
+    config = json.loads(example.read_bytes())
+    if WINDOWS:
+        config["browserChannel"] = ""
+    else:
         config["headless"] = True
-        defaults = json.dumps(config, indent=4).encode("utf-8")
+    defaults = json.dumps(config, indent=4).encode("utf-8")
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     try:
         with CONFIG_FILE.open("xb") as target:

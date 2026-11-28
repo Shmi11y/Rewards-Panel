@@ -2,6 +2,7 @@
 data/
 logs/
 ui-profile/
+browser-profile/
 updates/
 
 # 上游项目与浏览器内核（体积过大，自行放置/下载）

@@ -57,6 +57,56 @@ BUSY_EXIT = 75
 RUN_LOG_LIMIT = 512 * 1024
 NOTIFICATION_LIMIT = 200
 MAX_PAUSE_TIMESTAMP = 32_503_680_000
+BROWSER_CHANNELS = ("msedge", "chrome", "chromium")
+
+
+def windows_browser_paths() -> dict[str, str]:
+    pf = Path(os.environ.get("ProgramFiles", r"C:\Program Files"))
+    pf86 = Path(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"))
+    local = os.environ.get("LOCALAPPDATA")
+    locations = {"msedge": ("Microsoft/Edge/Application/msedge.exe", pf86, pf),
+                 "chrome": ("Google/Chrome/Application/chrome.exe", pf, pf86)}
+    paths = {}
+    for channel, (relative, *roots) in locations.items():
+        candidates = [root / relative for root in roots]
+        if local:
+            candidates.append(Path(local) / relative)
+        paths[channel] = next((str(path) for path in candidates if path.is_file()), "")
+    return paths
+
+
+def windows_default_browser_channel() -> str:
+    if os.name != "nt":
+        return ""
+    import winreg
+
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                            r"Software\Microsoft\Windows\Shell\Associations\UrlAssociations\https\UserChoice") as key:
+            progid = str(winreg.QueryValueEx(key, "ProgId")[0]).lower()
+    except OSError:
+        return ""
+    return {"msedgehtm": "msedge", "chromehtml": "chrome"}.get(progid, "")
+
+
+def configured_browser_channel(data: Path) -> str:
+    try:
+        value = json.loads((data / "config.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return ""
+    channel = value.get("browserChannel") if isinstance(value, dict) else None
+    return channel if channel in BROWSER_CHANNELS else ""
+
+
+def engine_browser_channel(data: Path) -> str:
+    channel = configured_browser_channel(data)
+    if channel or os.name != "nt":
+        return channel or "chromium"
+    paths = windows_browser_paths()
+    default = windows_default_browser_channel()
+    if paths.get(default):
+        return default
+    return next((name for name, path in paths.items() if path), "chromium")
 
 def _log_file(data: Path, run_id: int) -> Path:
     return data / "run-logs" / f"{run_id}.log"
@@ -297,9 +347,9 @@ def record_browser_assist(data: Path, *, source: str = "manual") -> int | None:
     run_id = _claim(data, source, None, "browser_assist")
     if run_id is None:
         return None
-    _finish(data, run_id, "assisted", [], None, 0, "用户在浏览器中手动完成")
+    _finish(data, run_id, "assisted", [], None, 0, "已从面板打开 Rewards。活动结果可在微软页面核对。")
     record_notice(data, "reminder", "浏览器辅助已打开",
-                  "请在浏览器中手动完成任务。完成后可回到面板查看记录。",
+                  "已从面板打开 Rewards，可在微软页面核对活动结果。",
                   run_id=run_id, event=f"browser-assist:{run_id}")
     return run_id
 
@@ -795,6 +845,8 @@ def run(data: Path, source: str, scheduled_at: int | None = None, schedule_kind:
             env = dict(os.environ, REWARDS_DATA_DIR=str(data), REWARDS_APP_ROOT=str(ROOT),
                        PLAYWRIGHT_BROWSERS_PATH=str(ROOT / "browser"), REWARDS_RUN_EVENTS=str(events),
                        NODE_NO_WARNINGS="1", REWARDS_RUN_ID=str(run_id))
+            if os.name == "nt" and not env.get("CONFIG_BROWSER_CHANNEL"):
+                env["CONFIG_BROWSER_CHANNEL"] = engine_browser_channel(data)
             node, entry, preload = node_path(ROOT), ROOT / "app/dist/index.js", ROOT / "task-data.cjs"
             missing = next((path for path in (entry, preload) if not path.is_file()), None)
             if node is None or not node.is_file():
