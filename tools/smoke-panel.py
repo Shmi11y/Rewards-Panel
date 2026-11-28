@@ -47,6 +47,8 @@ def main():
     assert status["app"]["platform"] == platform
     assert status["app"]["nodeOk"] and status["app"]["entryOk"]
     assert status["app"]["browser"] != "未安装"
+    expected_version = (Path(__file__).resolve().parents[1] / "VERSION").read_text().strip()
+    assert api("/api/selftest")["portableVersion"] == expected_version
     if check_persistence:
         assert status["schedule"]["paused"] and status["schedule"]["mode"] == "daily"
         assert api("/api/prefs")["theme"] == "dark"

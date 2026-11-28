@@ -25,18 +25,32 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-      - name: Install and test the Linux build
+      - name: Build the Linux archive
         shell: bash
         run: |
           bash install-linux.sh --with-deps
+          tar --exclude='app/.git' --exclude='__pycache__' \
+            -czf RewardsPanel-linux-x64.tar.gz \
+            VERSION LICENSE THIRD-PARTY-NOTICES.md README.md \
+            Dockerfile compose.yaml .dockerignore \
+            install-linux.sh launch-linux.sh panel assets \
+            account_holds.py windows_notifications.py run_history.py scheduler.py \
+            task-data.cjs run-events.cjs account-guard.cjs login.js app browser
+      - name: Test the extracted Linux archive
+        shell: bash
+        run: |
+          bundle="$RUNNER_TEMP/rewards-linux"
+          mkdir -p "$bundle"
+          tar -xzf RewardsPanel-linux-x64.tar.gz -C "$bundle"
+          cd "$bundle"
+          docker compose config --quiet
           export PLAYWRIGHT_BROWSERS_PATH="$PWD/browser"
-          node tools/smoke-browser.cjs
+          node - < "$GITHUB_WORKSPACE/tools/smoke-browser.cjs"
           export REWARDS_DATA_DIR="$(mktemp -d)"
           bash launch-linux.sh > "$RUNNER_TEMP/rewards-linux.log" 2>&1 &
           panel_pid=$!
           trap 'kill "$panel_pid" 2>/dev/null || true; cat "$RUNNER_TEMP/rewards-linux.log"' EXIT
-          python3 tools/smoke-panel.py linux "$REWARDS_DATA_DIR/.api-token"
-          tar --exclude='./.git' --exclude='./.github' --exclude='./node_modules'             -czf RewardsPanel-linux-x64.tar.gz             VERSION LICENSE THIRD-PARTY-NOTICES.md README.md             install-linux.sh launch-linux.sh panel assets             app browser run_history.py scheduler.py task-data.cjs run-events.cjs login.js
+          python3 "$GITHUB_WORKSPACE/tools/smoke-panel.py" linux "$REWARDS_DATA_DIR/.api-token"
       - uses: actions/upload-artifact@v4
         if: github.event_name == 'push'
         with:
@@ -64,11 +78,15 @@ jobs:
           docker compose exec -T rewards node - < tools/smoke-browser.cjs
           docker compose cp rewards:/opt/rewards/data/.api-token "$RUNNER_TEMP/rewards-token"
           python3 tools/smoke-panel.py docker "$RUNNER_TEMP/rewards-token"
-          docker compose restart rewards
-          python3 tools/smoke-panel.py docker "$RUNNER_TEMP/rewards-token" --check-persistence
           version=$(cat VERSION)
           docker tag rewards-panel:local "rewards-panel:$version"
           docker save "rewards-panel:$version" | gzip -1 > RewardsPanel-docker-amd64.tar.gz
+          docker compose down
+          docker image rm "rewards-panel:$version" rewards-panel:local
+          docker load -i RewardsPanel-docker-amd64.tar.gz
+          docker tag "rewards-panel:$version" rewards-panel:local
+          docker compose up -d --no-build
+          python3 tools/smoke-panel.py docker "$RUNNER_TEMP/rewards-token" --check-persistence
       - uses: actions/upload-artifact@v4
         if: github.event_name == 'push'
         with:
