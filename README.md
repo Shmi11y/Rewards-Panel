@@ -66,11 +66,11 @@ Python 和 Node.js 已随包提供。
 
 ## Linux 与 Docker
 
-Linux 和 Docker 版已同步至 v0.1.20，提供总览、账号管理、余额同步、手动任务、每日定时、补跑与暂停、运行记录、面板内通知和设置备份。每日定时在面板服务运行时生效。油猴脚本模式、托盘、Windows 通知、开机启动项和 EXE 一键更新适用于 Windows 桌面版。
+Linux 和 Docker 版已同步至 v0.1.21，提供总览、账号管理、余额同步、手动任务、每日定时、补跑与暂停、运行记录、面板内通知和设置备份。每日定时在面板服务运行时生效。油猴脚本模式、托盘、Windows 通知、开机启动项和 EXE 一键更新适用于 Windows 桌面版。
 
 ### Linux
 
-1. 下载并解压 [Linux x64 v0.1.20](https://github.com/Shmi11y/Rewards-Panel/releases/download/v0.1.20/RewardsPanel-linux-x64.tar.gz)。包内含任务引擎和 Chromium。推荐 Ubuntu 24.04 x64，需安装 Git、Python 3.10+、Node.js 24+ 和 npm。
+1. 下载并解压 [Linux x64 v0.1.21](https://github.com/Shmi11y/Rewards-Panel/releases/download/v0.1.21/RewardsPanel-linux-x64.tar.gz)。包内含任务引擎和 Chromium。推荐 Ubuntu 24.04 x64，需安装 Git、Python 3.10+、Node.js 24+ 和 npm。
 2. 在解压目录运行 `bash install-linux.sh --with-deps`，补齐 Chromium 所需的系统库。此步骤需要联网，可能请求 sudo。
 3. 运行 `bash launch-linux.sh`。另开终端，在相同目录执行 `cat data/.api-token`，将令牌填到 `http://127.0.0.1:8765/?k=你的令牌` 末尾后，用浏览器打开。
 4. 在「账号 → 添加账号」完成首次登录。登录窗口在运行面板的 Linux 桌面上弹出，需要可用的 X11 或 XWayland 会话。已有会话后的任务可以无头运行。
@@ -81,11 +81,11 @@ Linux 和 Docker 版已同步至 v0.1.20，提供总览、账号管理、余额�
 
 Docker 版在容器内运行面板和 Chromium。账号、会话、设置、定时计划和日志保存在 Compose 的 `rewards-data` 命名卷中。
 
-1. 从 [v0.1.20 源码包](https://github.com/Shmi11y/Rewards-Panel/archive/refs/tags/v0.1.20.tar.gz) 解出 `compose.yaml`。将 [Docker amd64 v0.1.20 镜像包](https://github.com/Shmi11y/Rewards-Panel/releases/download/v0.1.20/RewardsPanel-docker-amd64.tar.gz) 放在同一目录，然后执行以下命令。
+1. 从 [v0.1.21 源码包](https://github.com/Shmi11y/Rewards-Panel/archive/refs/tags/v0.1.21.tar.gz) 解出 `compose.yaml`。将 [Docker amd64 v0.1.21 镜像包](https://github.com/Shmi11y/Rewards-Panel/releases/download/v0.1.21/RewardsPanel-docker-amd64.tar.gz) 放在同一目录，然后执行以下命令。
 
    ```sh
    docker load -i RewardsPanel-docker-amd64.tar.gz
-   docker tag rewards-panel:0.1.20 rewards-panel:local
+   docker tag rewards-panel:0.1.21 rewards-panel:local
    docker compose up -d --no-build
    ```
 
